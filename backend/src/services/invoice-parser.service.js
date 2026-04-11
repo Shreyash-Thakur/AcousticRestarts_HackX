@@ -4,14 +4,17 @@ import { dirname, join } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT    = join(__dirname, "../../scripts/parse_invoice.py");
+const PYTHON_COMMANDS = process.env.PYTHON_CMD
+  ? [process.env.PYTHON_CMD]
+  : (process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python"]);
 
 /**
  * Pipe PDF buffer into parse_invoice.py (PyMuPDF) and return the
  * parsed fields object exactly as the Python script emits it.
  */
 function runPythonParser(buffer) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("python3", [SCRIPT]);
+  const runWith = (command) => new Promise((resolve, reject) => {
+    const proc = spawn(command, [SCRIPT]);
 
     let stdout = "";
     let stderr = "";
@@ -31,12 +34,33 @@ function runPythonParser(buffer) {
       }
     });
 
-    proc.on("error", (err) => reject(err));
+    proc.on("error", (err) => {
+      if (err?.code === "ENOENT") {
+        err.isCommandNotFound = true;
+      }
+      reject(err);
+    });
 
     // Write PDF bytes to stdin then close the stream
     proc.stdin.write(buffer);
     proc.stdin.end();
   });
+
+  return (async () => {
+    for (const command of PYTHON_COMMANDS) {
+      try {
+        return await runWith(command);
+      } catch (err) {
+        if (!err?.isCommandNotFound) {
+          throw err;
+        }
+      }
+    }
+
+    throw new Error(
+      `No Python runtime found. Tried: ${PYTHON_COMMANDS.join(", ")}`
+    );
+  })();
 }
 
 /**
