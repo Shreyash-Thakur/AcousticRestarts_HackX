@@ -28,7 +28,9 @@ const buildUnifiedInvoice = async (metadata) => {
     returnRate: risk.returnRate,
     reliability: risk.reliability,
     status: deriveInvoiceStatus({ amount, fundedAmount, isPaid }),
+    dueDate: metadata.dueDate,
     cashflow,
+    createdAt: metadata.createdAt,
     blockchainAvailable: Boolean(chainState.blockchainAvailable),
   };
 };

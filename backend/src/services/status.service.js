@@ -10,5 +10,5 @@ export const deriveInvoiceStatus = ({ amount, fundedAmount, isPaid }) => {
     return "Funded";
   }
 
-  return "Open";
+  return "Pending";
 };
