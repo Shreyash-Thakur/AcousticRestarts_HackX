@@ -45,7 +45,7 @@ interface IInvoToken {
  *
  *         Revenue: 0.5 – 1.0 % origination fee on fully-funded amount.
  */
-contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
+abstract contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
     // ═══════════════════════════════════════════════════════════════
     //  Roles
     // ═══════════════════════════════════════════════════════════════
