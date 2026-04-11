@@ -13,7 +13,9 @@ const FUNDING_POOL_ADDRESS = process.env.FUNDING_POOL_ADDRESS || "";
 const DEPLOYER_KEY = process.env.DEPLOYER_PRIVATE_KEY || "";
 
 const blockchainEnabled =
-  process.env.BLOCKCHAIN_ENABLED === "true" && Boolean(RPC_URL && INVO_TOKEN_ADDRESS);
+  process.env.BLOCKCHAIN_ENABLED === "false"
+    ? false
+    : Boolean(RPC_URL && INVO_TOKEN_ADDRESS);
 
 /* ── ABIs ── */
 const invoTokenAbi = [

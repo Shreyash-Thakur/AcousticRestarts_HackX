@@ -10,5 +10,9 @@ export const deriveInvoiceStatus = ({ amount, fundedAmount, isPaid }) => {
     return "Funded";
   }
 
+  if (funded > 0 && funded < totalAmount) {
+    return "Funding";
+  }
+
   return "Pending";
 };

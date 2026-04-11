@@ -71,7 +71,9 @@ export default function SMEDashboard() {
           trustScore: inv.riskScore ?? 75,
           riskLevel: inv.riskLevel || "Medium",
           dueDate: inv.dueDate ? new Date(inv.dueDate).toLocaleDateString("en-CA") : "",
-          status: (inv.status || "Pending").toLowerCase() === "pending" ? "draft"
+          status: (inv.status || "Pending").toLowerCase() === "pending"
+                    ? (inv.tokenId ? "funding" : "draft")
+                : (inv.status || "").toLowerCase() === "funding" ? "funding"
                 : (inv.status || "").toLowerCase() === "funded" ? "funded"
                 : (inv.status || "").toLowerCase() === "paid" ? "settled"
                 : "funding",
