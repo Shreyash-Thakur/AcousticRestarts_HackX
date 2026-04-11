@@ -9,3 +9,12 @@ export const addInvoice = (invoice) => {
 };
 
 export const getAllInvoices = () => [...invoices];
+
+export const getInvoiceById = (invoiceId) => {
+  const parsedId = Number(invoiceId);
+  if (!Number.isFinite(parsedId)) {
+    return null;
+  }
+
+  return invoices.find((invoice) => invoice.id === parsedId) || null;
+};

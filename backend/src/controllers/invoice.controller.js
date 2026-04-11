@@ -1,11 +1,11 @@
 import {
   addInvoice,
-  getAllInvoices,
   getNextInvoiceId,
 } from "../../data/invoices.js";
-import { getRiskInsights } from "../services/risk.service.js";
-import { getInvoiceOnChain } from "../services/blockchain.service.js";
-import { simulateCashflow } from "../services/cashflow.service.js";
+import {
+  getAllFullInvoices,
+  getFullInvoice,
+} from "../services/invoice-orchestration.service.js";
 
 const isValidDate = (value) => !Number.isNaN(Date.parse(value));
 
@@ -29,24 +29,18 @@ export const createInvoice = async (req, res) => {
     }
 
     const id = getNextInvoiceId();
-    const risk = getRiskInsights(clientName);
-    const cashflow = simulateCashflow(parsedAmount, dueDate);
-
-    const invoice = addInvoice({
+    addInvoice({
       id,
       businessName,
       clientName,
       amount: parsedAmount,
       dueDate,
-      riskScore: risk.riskScore,
-      riskLevel: risk.riskLevel,
-      returnRate: risk.returnRate,
-      reliability: risk.reliability,
-      cashflow,
       createdAt: new Date().toISOString(),
     });
 
-    return res.status(201).json(invoice);
+    const fullInvoice = await getFullInvoice(id);
+
+    return res.status(201).json(fullInvoice);
   } catch (error) {
     return res.status(500).json({ message: "Failed to create invoice" });
   }
@@ -54,38 +48,8 @@ export const createInvoice = async (req, res) => {
 
 export const listInvoices = async (_req, res) => {
   try {
-    const invoices = getAllInvoices();
-
-    const merged = await Promise.all(
-      invoices.map(async (invoice) => {
-        const onChain = await getInvoiceOnChain(invoice.id);
-        const fundedAmount = Number(onChain.fundedAmount || 0);
-
-        let status = "Pending";
-        if (onChain.isPaid) {
-          status = "Paid";
-        } else if (fundedAmount > 0) {
-          status = "Funded";
-        }
-
-        return {
-          id: invoice.id,
-          businessName: invoice.businessName,
-          clientName: invoice.clientName,
-          amount: Number(onChain.amount || invoice.amount),
-          fundedAmount,
-          riskScore: invoice.riskScore,
-          reliability: invoice.reliability,
-          status,
-          dueDate: invoice.dueDate,
-          riskLevel: invoice.riskLevel,
-          returnRate: invoice.returnRate,
-          cashflow: invoice.cashflow,
-        };
-      })
-    );
-
-    return res.json(merged);
+    const fullInvoices = await getAllFullInvoices();
+    return res.json(fullInvoices.filter(Boolean));
   } catch (error) {
     return res.status(500).json({ message: "Failed to fetch invoices" });
   }
