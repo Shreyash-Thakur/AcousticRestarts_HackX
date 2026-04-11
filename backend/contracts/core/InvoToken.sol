@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Base64.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 import "../interfaces/IERC3525.sol";
 
 /**
@@ -21,6 +23,7 @@ import "../interfaces/IERC3525.sol";
  *         ● Value can be split across investors via transferFrom(id→address).
  */
 contract InvoToken is ERC721, AccessControl, ReentrancyGuard, IERC3525 {
+    using Strings for uint256;
     // ═══════════════════════════════════════════════════════════════
     //  Constants & Roles
     // ═══════════════════════════════════════════════════════════════
@@ -86,6 +89,69 @@ contract InvoToken is ERC721, AccessControl, ReentrancyGuard, IERC3525 {
     constructor(address _admin) ERC721("InvoFlow Invoice Token", "INVO") {
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(MINTER_ROLE, _admin);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ERC-721 Token URI  (on-chain metadata)
+    // ═══════════════════════════════════════════════════════════════
+
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        _requireOwned(tokenId);
+        string memory json = Base64.encode(bytes(_buildMetadata(tokenId)));
+        return string.concat("data:application/json;base64,", json);
+    }
+
+    function _buildMetadata(uint256 tokenId) internal view returns (string memory) {
+        Invoice memory inv = _invoices[tokenId];
+        string memory amountStr = _formatUsdc(inv.fiatAmount);
+        string memory statusStr = _statusLabel(inv.status);
+        string memory slotStr   = _slots[tokenId].toString();
+
+        return string.concat(
+            '{"name":"InvoFlow Invoice #', tokenId.toString(),
+            '","description":"Tokenised SME invoice. IRN: ', inv.irn,
+            ' | Amount: ', amountStr,
+            ' | Status: ', statusStr,
+            '","image":"https://invoflow.xyz/nft/', tokenId.toString(),
+            '.svg","attributes":', _buildAttributes(inv, amountStr, statusStr, slotStr), '}'
+        );
+    }
+
+    function _buildAttributes(
+        Invoice memory inv,
+        string memory amountStr,
+        string memory statusStr,
+        string memory slotStr
+    ) internal pure returns (string memory) {
+        return string.concat(
+            '[',
+            '{"trait_type":"IRN","value":"', inv.irn, '"},',
+            '{"trait_type":"Amount","value":"', amountStr, '"},',
+            '{"trait_type":"Due Date","display_type":"date","value":', inv.dueDate.toString(), '},',
+            '{"trait_type":"Status","value":"', statusStr, '"},',
+            '{"trait_type":"Buyer Slot","value":"', slotStr, '"}',
+            ']'
+        );
+    }
+
+    function _formatUsdc(uint256 amount) internal pure returns (string memory) {
+        return string.concat(
+            (amount / 1e6).toString(), ".",
+            _padTwo((amount % 1e6) / 1e4), " USDC"
+        );
+    }
+
+    function _statusLabel(InvoiceStatus s) internal pure returns (string memory) {
+        if (s == InvoiceStatus.Verified)  return "Verified - Awaiting Funding";
+        if (s == InvoiceStatus.Funded)    return "Fully Funded";
+        if (s == InvoiceStatus.Settled)   return "Settled - Yields Unlocked";
+        return "Defaulted";
+    }
+
+    /// @dev Zero-pad a number to 2 digits (for decimal display).
+    function _padTwo(uint256 n) internal pure returns (string memory) {
+        if (n < 10) return string.concat("0", n.toString());
+        return n.toString();
     }
 
     // ═══════════════════════════════════════════════════════════════
