@@ -13,6 +13,7 @@ interface IFundingPool {
         uint256 tokenId; // InvoToken ID being funded
         uint256 targetAmount; // Total ETH needed (= invoice VALUE in wei)
         uint256 fundedAmount; // ETH raised so far
+        uint256 fundingDeadline; // block.timestamp after which platform can backstop
         bool fullyFunded; // True once fundedAmount == targetAmount
         bool settled; // True once buyer pays fiat → yields unlocked
         bool defaulted; // True if invoice defaulted
@@ -51,6 +52,11 @@ interface IFundingPool {
         uint256 amount
     );
 
+    event BackstopExecuted(
+        uint256 indexed tokenId,
+        uint256 platformAmount
+    );
+
     // ═══════════════════════ Functions ════════════════════
 
     /// @notice Open a funding round for a verified invoice token.
@@ -75,6 +81,9 @@ interface IFundingPool {
         address to,
         uint256 amount
     ) external;
+
+    /// @notice Platform fills remaining gap after funding deadline passes.
+    function platformBackstop(uint256 tokenId) external payable;
 
     /// @notice Get funding info for a token.
     function getFundingInfo(

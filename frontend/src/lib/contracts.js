@@ -2,8 +2,8 @@ import { ethers } from "ethers";
 
 /* ── Deployed contract addresses (Base Sepolia) ── */
 export const ADDRESSES = {
-  InvoToken:   "0xe8f6b202e7a37fce5b7bDCAa10EdE02C79842207",
-  FundingPool: "0xFA2F0cbCF71Af70c9E0a74DAE7e3Cf27B82c8b82",
+  InvoToken:   "0x07FBF14546dEc7e902f095EA3eBe559301214097",
+  FundingPool: "0x1b03D203D723Bc1093E3eE09eeb0a10fB814A181",
 };
 
 /* ── Minimal ABIs for frontend interaction ── */
@@ -21,7 +21,7 @@ export const ABIS = {
     "function invest(uint256 tokenId) external payable",
     "function claimReturns(uint256 tokenId) external",
     "function transferInvestment(uint256 tokenId, address to, uint256 amount) external",
-    "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, bool fullyFunded, bool settled, bool defaulted))",
+    "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled, bool defaulted))",
     "function getInvestment(address, uint256) view returns (uint256)",
     "function hasClaimed(address, uint256) view returns (bool)",
     "event InvestmentMade(uint256 indexed tokenId, address indexed investor, uint256 amount)",

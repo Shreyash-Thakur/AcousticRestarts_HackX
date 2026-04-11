@@ -28,11 +28,12 @@ const invoTokenAbi = [
 ];
 const fundingPoolAbi = [
   "function openFunding(uint256 tokenId) external",
-  "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, bool fullyFunded, bool settled, bool defaulted))",
+  "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled, bool defaulted))",
   "function getInvestment(address, uint256) view returns (uint256)",
   "function settleInvoice(uint256 tokenId) external payable",
   "function invest(uint256 tokenId) external payable",
   "function transferInvestment(uint256 tokenId, address to, uint256 amount) external",
+  "function platformBackstop(uint256 tokenId) external payable",
 ];
 
 /* ── Provider + Contracts ── */
@@ -260,5 +261,66 @@ export const investOnBehalf = async (tokenId, investorWallet, amountINR) => {
   } catch (err) {
     console.error("investOnBehalf error:", err.message);
     return { success: false, reason: err.message };
+  }
+};
+
+/* ── Platform Backstop — fill remaining gap after 2-week deadline ── */
+export const callPlatformBackstop = async (tokenId) => {
+  if (!blockchainEnabled || !fundingPoolWrite || !fundingPoolRead) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+  try {
+    const fi = await fundingPoolRead.getFundingInfo(tokenId);
+    if (fi.fullyFunded) return { success: false, reason: "already_funded" };
+    if (fi.targetAmount === 0n) return { success: false, reason: "not_open" };
+
+    const now = Math.floor(Date.now() / 1000);
+    if (now < Number(fi.fundingDeadline)) {
+      return { success: false, reason: "deadline_not_reached" };
+    }
+
+    const remaining = fi.targetAmount - fi.fundedAmount;
+    const tx = await fundingPoolWrite.platformBackstop(tokenId, {
+      value: remaining,
+      gasLimit: 600000n,
+    });
+    const receipt = await tx.wait();
+
+    return { success: true, txHash: receipt.hash, amountETH: ethers.formatEther(remaining) };
+  } catch (err) {
+    console.error("callPlatformBackstop error:", err.message);
+    return { success: false, reason: err.message };
+  }
+};
+
+/* ── Get all open fundings past deadline (for cron) ── */
+export const getExpiredUnfundedTokens = async () => {
+  if (!blockchainEnabled || !invoTokenRead || !fundingPoolRead) return [];
+  try {
+    const supply = Number(await invoTokenRead.totalSupply());
+    const expired = [];
+    const now = Math.floor(Date.now() / 1000);
+
+    for (let i = 1; i <= supply; i++) {
+      try {
+        const fi = await fundingPoolRead.getFundingInfo(i);
+        if (
+          fi.targetAmount > 0n &&
+          !fi.fullyFunded &&
+          !fi.defaulted &&
+          Number(fi.fundingDeadline) > 0 &&
+          now >= Number(fi.fundingDeadline)
+        ) {
+          expired.push({
+            tokenId: i,
+            remaining: fi.targetAmount - fi.fundedAmount,
+            deadline: Number(fi.fundingDeadline),
+          });
+        }
+      } catch { /* funding not opened for this token */ }
+    }
+    return expired;
+  } catch {
+    return [];
   }
 };

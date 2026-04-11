@@ -62,6 +62,7 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
 
     uint256 public constant MAX_FEE_BPS = 100; // hard cap at 1%
     uint256 public constant BPS_DENOM = 10_000;
+    uint256 public constant FUNDING_PERIOD = 2 weeks; // backstop deadline
 
     // ═══════════════════════════════════════════════════════════════
     //  Funding Storage
@@ -138,6 +139,7 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
 
         f.tokenId = tokenId;
         f.targetAmount = target;
+        f.fundingDeadline = block.timestamp + FUNDING_PERIOD;
 
         emit FundingOpened(tokenId, target);
     }
@@ -176,8 +178,44 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  3. Settlement (webhook / admin triggers)
+    // ═══════════════════════════════════════════════════════════════    //  2a. Platform Backstop (auto-fill after deadline)
+    // ═════════════════════════════════════════════════════════════
+
+    /// @inheritdoc IFundingPool
+    function platformBackstop(
+        uint256 tokenId
+    ) external payable onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        FundingInfo storage f = _fundings[tokenId];
+        require(f.targetAmount > 0, "FundingPool: not open");
+        require(!f.fullyFunded, "FundingPool: already funded");
+        require(
+            block.timestamp >= f.fundingDeadline,
+            "FundingPool: deadline not reached"
+        );
+
+        uint256 remaining = f.targetAmount - f.fundedAmount;
+        require(msg.value >= remaining, "FundingPool: insufficient backstop");
+
+        f.fundedAmount = f.targetAmount;
+        f.fullyFunded = true;
+
+        // Track platform as an investor for pro-rata claims
+        _investments[msg.sender][tokenId] += remaining;
+
+        // Refund excess
+        if (msg.value > remaining) {
+            (bool refunded, ) = payable(msg.sender).call{
+                value: msg.value - remaining
+            }("");
+            require(refunded, "FundingPool: refund failed");
+        }
+
+        emit BackstopExecuted(tokenId, remaining);
+
+        _disbursePrincipal(tokenId, f);
+    }
+
+    // ═════════════════════════════════════════════════════════════    //  3. Settlement (webhook / admin triggers)
     // ═══════════════════════════════════════════════════════════════
 
     /// @inheritdoc IFundingPool
