@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useWeb3 } from "../context/Web3Context";
 
@@ -17,6 +17,13 @@ const WalletIcon = () => (
     <path d="M18 12a2 2 0 0 0 0 4h4v-4h-4z"/>
   </svg>
 );
+
+const UserIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+  </svg>
+);
+
 const MenuIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
@@ -28,22 +35,46 @@ const CloseIcon = () => (
   </svg>
 );
 
-const navLinks = [
-  { to: "/marketplace", label: "Marketplace" },
-  { to: "/upload", label: "Upload Invoice" },
-  { to: "/dashboard/sme", label: "SME Dashboard" },
-  { to: "/dashboard/investor", label: "Portfolio" },
+const allNavLinks = [
+  { to: "/marketplace", label: "Marketplace", roles: ["sme", "investor", null] },
+  { to: "/upload", label: "Upload Invoice", roles: ["sme", null] },
+  { to: "/dashboard/sme", label: "SME Dashboard", roles: ["sme", null] },
+  { to: "/dashboard/investor", label: "Portfolio", roles: ["investor", null] },
 ];
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
-  const { account, isConnected, isCorrectChain, connecting, connectWallet, disconnectWallet } = useWeb3();
+  const { account, isConnected, isCorrectChain, connecting, connectWallet, disconnectWallet, walletSource, privyUser, privyAuthenticated, userRole, selectRole } = useWeb3();
   const location = useLocation();
+  const navigate = useNavigate();
   const isActive = (path) => location.pathname === path;
+
+  const handleSwitchRole = () => {
+    selectRole(null);
+    navigate("/");
+  };
+
+  // Filter nav links by current role
+  const navLinks = allNavLinks.filter((link) => link.roles.includes(userRole));
 
   const truncatedAddress = account
     ? `${account.slice(0, 6)}…${account.slice(-4)}`
     : "";
+
+  // Show email or address badge
+  const displayLabel = (() => {
+    if (connecting) return "Creating Wallet…";
+    if (!isConnected && !privyAuthenticated) return "Login";
+    if (!isConnected && privyAuthenticated) return "Creating Wallet…";
+    if (!isCorrectChain) return "Wrong Network";
+    if (privyAuthenticated && privyUser?.email?.address) {
+      return privyUser.email.address.split("@")[0];
+    }
+    if (privyAuthenticated && privyUser?.google?.email) {
+      return privyUser.google.email.split("@")[0];
+    }
+    return truncatedAddress;
+  })();
 
   return (
     <>
@@ -94,8 +125,31 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* Wallet + hamburger */}
+          {/* Role badge + Wallet + hamburger */}
           <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+            {isConnected && userRole && (
+              <button
+                onClick={handleSwitchRole}
+                title="Switch role"
+                style={{
+                  padding: "0.35rem 0.75rem",
+                  borderRadius: "999px",
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  border: "1.5px solid",
+                  borderColor: userRole === "sme" ? "rgba(21,128,61,0.3)" : "rgba(29,78,216,0.3)",
+                  background: userRole === "sme" ? "#DCFCE7" : "#DBEAFE",
+                  color: userRole === "sme" ? "#15803D" : "#1D4ED8",
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {userRole === "sme" ? "SME" : "Investor"} ✕
+              </button>
+            )}
             <button
               onClick={isConnected ? disconnectWallet : connectWallet}
               style={{
@@ -116,8 +170,8 @@ export default function Navbar() {
                 whiteSpace: "nowrap",
               }}
             >
-              <WalletIcon />
-              {connecting ? "Connecting…" : isConnected ? (isCorrectChain ? truncatedAddress : "Wrong Network") : "Connect Wallet"}
+              {isConnected ? <UserIcon /> : <WalletIcon />}
+              {displayLabel}
             </button>
 
             <button

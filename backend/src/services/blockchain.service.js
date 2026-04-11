@@ -30,6 +30,9 @@ const fundingPoolAbi = [
   "function openFunding(uint256 tokenId) external",
   "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, bool fullyFunded, bool settled, bool defaulted))",
   "function getInvestment(address, uint256) view returns (uint256)",
+  "function settleInvoice(uint256 tokenId) external payable",
+  "function invest(uint256 tokenId) external payable",
+  "function transferInvestment(uint256 tokenId, address to, uint256 amount) external",
 ];
 
 /* ── Provider + Contracts ── */
@@ -183,5 +186,79 @@ export const getChainStats = async () => {
     return { totalTokens: supply, totalFunded };
   } catch {
     return null;
+  }
+};
+
+/* ── INR → ETH conversion ── */
+const INR_PER_ETH = Number(process.env.INR_PER_ETH) || 250000;
+
+export const convertINRtoWei = (amountINR) => {
+  const ethAmount = amountINR / INR_PER_ETH;
+  return ethers.parseEther(ethAmount.toFixed(18));
+};
+
+export const convertINRtoETH = (amountINR) => amountINR / INR_PER_ETH;
+
+/* ── Settle invoice on-chain (called by webhook after fiat payment) ── */
+export const settleInvoiceOnChain = async (tokenId, amountINR) => {
+  if (!blockchainEnabled || !fundingPoolWrite) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+  try {
+    const fi = await fundingPoolRead.getFundingInfo(tokenId);
+    if (!fi.fullyFunded) {
+      return { success: false, reason: "invoice_not_fully_funded" };
+    }
+    if (fi.settled) {
+      return { success: false, reason: "already_settled" };
+    }
+
+    // Settlement value must be >= targetAmount. For hackathon, send targetAmount + 5% yield.
+    const yieldMultiplier = 105n; // 105% = principal + 5% yield
+    const settlementValue = (fi.targetAmount * yieldMultiplier) / 100n;
+
+    const tx = await fundingPoolWrite.settleInvoice(tokenId, { value: settlementValue, gasLimit: 500000n });
+    const receipt = await tx.wait();
+
+    return { success: true, txHash: receipt.hash, settlementValue: ethers.formatEther(settlementValue) };
+  } catch (err) {
+    console.error("settleInvoiceOnChain error:", err.message);
+    return { success: false, reason: err.message };
+  }
+};
+
+/* ── Invest on behalf of a UPI investor (platform wallet invests, then transfers position) ── */
+export const investOnBehalf = async (tokenId, investorWallet, amountINR) => {
+  if (!blockchainEnabled || !fundingPoolWrite) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+  try {
+    const amountWei = convertINRtoWei(amountINR);
+
+    // 1. Platform wallet invests
+    const investTx = await fundingPoolWrite.invest(tokenId, { value: amountWei, gasLimit: 500000n });
+    const investReceipt = await investTx.wait();
+
+    // 2. Transfer the position to the actual investor wallet
+    let transferTxHash = null;
+    if (investorWallet && investorWallet !== wallet.address) {
+      try {
+        const transferTx = await fundingPoolWrite.transferInvestment(tokenId, investorWallet, amountWei, { gasLimit: 300000n });
+        const transferReceipt = await transferTx.wait();
+        transferTxHash = transferReceipt.hash;
+      } catch (err) {
+        console.error("transferInvestment failed (non-fatal):", err.message);
+      }
+    }
+
+    return {
+      success: true,
+      investTxHash: investReceipt.hash,
+      transferTxHash,
+      amountETH: ethers.formatEther(amountWei),
+    };
+  } catch (err) {
+    console.error("investOnBehalf error:", err.message);
+    return { success: false, reason: err.message };
   }
 };

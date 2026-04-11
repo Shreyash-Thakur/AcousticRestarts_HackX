@@ -89,17 +89,21 @@ export default function InvestorDashboard() {
       return;
     }
     let cancelled = false;
+    setPositions([]); // clear previous account's data immediately
     (async () => {
       setLoadingChain(true);
       try {
+        console.log("[InvestorDashboard] Fetching positions for account:", account);
         const invoToken = getInvoTokenRead();
         const fundingPool = getFundingPoolRead();
         const total = Number(await invoToken.totalSupply());
+        console.log("[InvestorDashboard] totalSupply:", total);
         const found = [];
         for (let tokenId = 1; tokenId <= total; tokenId++) {
           try {
             const invested = await fundingPool.getInvestment(account, tokenId);
             const investedNum = formatTokenValue(invested);
+            console.log(`[InvestorDashboard] token ${tokenId} investment for ${account}:`, investedNum);
             if (investedNum > 0) {
               const info = await fundingPool.getFundingInfo(tokenId);
               const inv = await invoToken.getInvoice(tokenId);
@@ -133,15 +137,17 @@ export default function InvestorDashboard() {
     return () => { cancelled = true; };
   }, [account, isConnected]);
 
-  // Use on-chain positions if available, else mock data
-  const investorPortfolio = positions.length > 0 ? [...positions, ...mockPortfolio] : mockPortfolio;
+  // When connected, show only real on-chain positions; otherwise demo mock data
+  const investorPortfolio = isConnected ? positions : mockPortfolio;
 
   const totalInvested = investorPortfolio.reduce((s, p) => s + p.investedAmount, 0);
   const totalExpected = investorPortfolio.reduce((s, p) => s + p.investedAmount + p.expectedReturn, 0);
-  const avgYield = (investorPortfolio.reduce((s, p) => s + p.yield, 0) / investorPortfolio.length).toFixed(1);
+  const avgYield = investorPortfolio.length > 0
+    ? (investorPortfolio.reduce((s, p) => s + p.yield, 0) / investorPortfolio.length).toFixed(1)
+    : "0.0";
 
   const metrics = [
-    { label: "Total Invested",   value: `$${totalInvested.toLocaleString()}`, icon: <WalletIcon />,  color: "#15803D", bg: "#DCFCE7", desc: isConnected ? "Includes on-chain" : "Demo data" },
+    { label: "Total Invested",   value: `$${totalInvested.toLocaleString()}`, icon: <WalletIcon />,  color: "#15803D", bg: "#DCFCE7", desc: isConnected ? "On-chain only" : "Demo data" },
     { label: "Portfolio Value",  value: `$${Math.round(totalExpected).toLocaleString()}`, icon: <TrendUpIcon />, color: "#1D4ED8", bg: "#DBEAFE", desc: "Including expected returns" },
     { label: "Average Yield",   value: `${avgYield}%`,                        icon: <PercentIcon />, color: "#B45309", bg: "#FEF3C7", desc: "Annualized" },
     { label: "Active Positions", value: String(investorPortfolio.length),      icon: <LayersIcon />,  color: "#0D9488", bg: "#CCFBF1", desc: `${positions.length} on-chain` },
@@ -160,7 +166,7 @@ export default function InvestorDashboard() {
               Investor Portfolio
             </h1>
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>
-              {isConnected ? `Connected: ${account.slice(0, 6)}…${account.slice(-4)}` : "Connect wallet to see on-chain positions"}
+              {isConnected ? `Connected: ${account.slice(0,6)}…${account.slice(-4)}` : "Connect wallet to see on-chain positions"}
             </p>
           </div>
           <button

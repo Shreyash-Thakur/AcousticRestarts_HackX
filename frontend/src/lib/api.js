@@ -76,3 +76,88 @@ export async function cancelListingApi(listingId, sellerWallet) {
   }
   return res.json();
 }
+
+/* ── UPI / Razorpay Payments ── */
+
+/**
+ * Create a Razorpay order for settlement (buyer pays invoice) or investment (fund via UPI).
+ * @param {{ tokenId, amountINR, purpose: "settlement"|"investment", investorWallet? }} opts
+ * @returns {{ orderId, amount, currency, key_id }}
+ */
+export async function createPaymentOrder({ tokenId, amountINR, purpose, investorWallet }) {
+  const res = await fetch(`${API_BASE}/payments/create-order`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tokenId, amountINR, purpose, investorWallet }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Verify Razorpay payment signature after checkout.
+ */
+export async function verifyPayment({ orderId, paymentId, signature }) {
+  const res = await fetch(`${API_BASE}/payments/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderId, paymentId, signature }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * Open Razorpay checkout in the browser.
+ * Loads the Razorpay script if not already present, then opens the modal.
+ *
+ * @param {{ orderId, amount, currency, key_id }} order - from createPaymentOrder()
+ * @param {{ name?, description?, prefillEmail?, prefillContact? }} opts
+ * @returns {Promise<{ orderId, paymentId, signature }>}
+ */
+export function openRazorpayCheckout(order, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const loadAndOpen = () => {
+      const options = {
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        order_id: order.orderId,
+        name: opts.name || "InvoFlow",
+        description: opts.description || "Invoice Payment",
+        prefill: {
+          email: opts.prefillEmail || "",
+          contact: opts.prefillContact || "",
+        },
+        handler: (response) => {
+          resolve({
+            orderId: response.razorpay_order_id,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature,
+          });
+        },
+        modal: {
+          ondismiss: () => reject(new Error("Payment cancelled by user")),
+        },
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    };
+
+    if (window.Razorpay) {
+      loadAndOpen();
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = loadAndOpen;
+      script.onerror = () => reject(new Error("Failed to load Razorpay SDK"));
+      document.head.appendChild(script);
+    }
+  });
+}

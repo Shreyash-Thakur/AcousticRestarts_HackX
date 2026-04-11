@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { invoices as mockInvoices } from "../data/mockData";
-import { fetchInvoices, createListing, fetchListings, buyListingApi, cancelListingApi } from "../lib/api";
+import { fetchInvoices, createListing, fetchListings, buyListingApi, cancelListingApi, createPaymentOrder, verifyPayment, openRazorpayCheckout } from "../lib/api";
 import { useWeb3 } from "../context/Web3Context";
 import { getFundingPool, getFundingPoolRead, formatTokenValue, parseTokenValue, txUrl, ADDRESSES, FUNDING_POOL_DEPLOY_BLOCK, getReadProvider } from "../lib/contracts";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
@@ -258,6 +258,86 @@ export default function InvoiceDetailPage() {
   };
 
   const holdsPosition = myPosition > 0;
+
+  /* ── Fund This Invoice via UPI (Razorpay) ── */
+  const [upiLoading, setUpiLoading] = useState("");
+  const [upiSuccess, setUpiSuccess] = useState(false);
+
+  const handleFundViaUPI = async () => {
+    if (!tokenId) { alert("Invoice not minted on-chain yet."); return; }
+    const parsedAmt = parseFloat(investAmount.replace(/,/g, "")) || 0;
+    if (parsedAmt <= 0) return;
+
+    // Convert USD → INR (rough rate for demo)
+    const INR_PER_USD = 83;
+    const amountINR = parsedAmt * INR_PER_USD;
+
+    setUpiLoading("Creating order…");
+    try {
+      const order = await createPaymentOrder({
+        tokenId,
+        amountINR,
+        purpose: "investment",
+        investorWallet: account || undefined,
+      });
+
+      setUpiLoading("Opening Razorpay…");
+      const result = await openRazorpayCheckout(order, {
+        description: `Invest $${parsedAmt} in Invoice #${tokenId}`,
+      });
+
+      setUpiLoading("Verifying payment…");
+      await verifyPayment(result);
+
+      setUpiSuccess(true);
+      setUpiLoading("");
+      setFunded(true);
+    } catch (err) {
+      console.error("UPI funding failed:", err);
+      setUpiLoading("");
+      if (err.message !== "Payment cancelled by user") {
+        alert(err?.message || "UPI payment failed");
+      }
+    }
+  };
+
+  /* ── Settle Invoice via UPI (buyer pays fiat) ── */
+  const [settleLoading, setSettleLoading] = useState("");
+
+  const handleSettleViaUPI = async () => {
+    if (!tokenId) { alert("Invoice not minted on-chain yet."); return; }
+    const totalAmount = realAmount || invoice?.amount || 0;
+    if (totalAmount <= 0) return;
+
+    const INR_PER_USD = 83;
+    const amountINR = totalAmount * INR_PER_USD;
+
+    setSettleLoading("Creating order…");
+    try {
+      const order = await createPaymentOrder({
+        tokenId,
+        amountINR,
+        purpose: "settlement",
+      });
+
+      setSettleLoading("Opening Razorpay…");
+      const result = await openRazorpayCheckout(order, {
+        description: `Settle Invoice #${tokenId} — ₹${Math.round(amountINR).toLocaleString()}`,
+      });
+
+      setSettleLoading("Verifying…");
+      await verifyPayment(result);
+
+      setSettleLoading("");
+      alert("Settlement payment received! Invoice will be settled on-chain shortly via webhook.");
+    } catch (err) {
+      console.error("Settlement failed:", err);
+      setSettleLoading("");
+      if (err.message !== "Payment cancelled by user") {
+        alert(err?.message || "Settlement payment failed");
+      }
+    }
+  };
 
   /* ── List position for sale ── */
   const handleListForSale = async () => {
@@ -602,6 +682,16 @@ export default function InvoiceDetailPage() {
                 >
                   {fundingLoading || (!isConnected ? "Connect Wallet First" : "Fund This Invoice")}
                 </button>
+
+                {/* Fund via UPI (Razorpay) — no wallet needed */}
+                <button
+                  className="btn btn-outline"
+                  style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem", fontSize: "0.88rem", gap: "0.4rem" }}
+                  disabled={!parsedAmount || parsedAmount > remaining || parsedAmount < 1 || !!upiLoading}
+                  onClick={handleFundViaUPI}
+                >
+                  {upiLoading || "💳 Fund via UPI / Card"}
+                </button>
                 {isConnected && ethBalance !== null && (
                   <p style={{ fontSize: "0.74rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.4rem", fontFamily: "var(--font-body)" }}>
                     Your ETH balance: <strong>{ethBalance.toFixed(4)} ETH</strong>
@@ -632,6 +722,36 @@ export default function InvoiceDetailPage() {
                   View Portfolio
                 </button>
               </motion.div>
+            )}
+
+            {/* Settle Invoice via UPI — for corporate buyers */}
+            {chainFunding && chainFunding.fullyFunded && !chainFunding.settled && (
+              <div className="card" style={{ borderColor: "rgba(180,83,9,0.2)", background: "#FFFBEB" }}>
+                <h3 style={{ fontWeight: 700, marginBottom: "0.5rem", fontSize: "0.95rem", fontFamily: "var(--font-head)", color: "#92400E" }}>
+                  Buyer Settlement
+                </h3>
+                <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginBottom: "1rem", fontFamily: "var(--font-body)" }}>
+                  This invoice is fully funded. The corporate buyer can settle the invoice by paying via UPI/Card.
+                  Settlement triggers on-chain yield distribution to investors.
+                </p>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "rgba(180,83,9,0.08)", borderRadius: "8px" }}>
+                  <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>Settlement Amount</span>
+                  <span style={{ fontWeight: 700, color: "#92400E", fontFamily: "var(--font-body)" }}>
+                    ${realAmount.toLocaleString()} (~₹{Math.round(realAmount * 83).toLocaleString()})
+                  </span>
+                </div>
+                <button
+                  className="btn btn-outline"
+                  style={{ width: "100%", justifyContent: "center", borderColor: "#D97706", color: "#92400E", gap: "0.4rem" }}
+                  disabled={!!settleLoading}
+                  onClick={handleSettleViaUPI}
+                >
+                  {settleLoading || "💳 Settle via UPI / Card"}
+                </button>
+                <p style={{ fontSize: "0.7rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.4rem", fontFamily: "var(--font-body)" }}>
+                  Razorpay webhook will trigger on-chain settlement automatically
+                </p>
+              </div>
             )}
 
             {/* Holds position — secondary market */}

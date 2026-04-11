@@ -52,7 +52,7 @@ const scoreColor = (s) => s >= 80 ? "#15803D" : s >= 60 ? "#B45309" : "#B91C1C";
 
 export default function SMEDashboard() {
   const navigate = useNavigate();
-  const { account, isConnected } = useWeb3();
+  const { account, isConnected, userRole } = useWeb3();
   const [liveInvoices, setLiveInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -90,9 +90,14 @@ export default function SMEDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Merge: live invoices first, then mock data for demo richness
-  const smeInvoices = liveInvoices.length > 0
-    ? [...liveInvoices, ...fallbackInvoices]
+  // Filter: show only this SME's invoices when connected
+  const myLiveInvoices = isConnected && account
+    ? liveInvoices.filter((inv) => inv.smeWallet && inv.smeWallet.toLowerCase() === account.toLowerCase())
+    : liveInvoices;
+
+  // Show only own invoices when logged in as SME; fallback to mock for demo
+  const smeInvoices = isConnected
+    ? (myLiveInvoices.length > 0 ? myLiveInvoices : [])
     : fallbackInvoices;
 
   // Dynamic metrics from real data
@@ -101,7 +106,7 @@ export default function SMEDashboard() {
     const totalLiquidity = smeInvoices.reduce((s, inv) => s + (inv.fundedAmount || 0), 0);
     const outstanding = smeInvoices.filter((inv) => inv.status === "funding" || inv.status === "draft").length;
     const settled = smeInvoices.filter((inv) => inv.status === "settled" || inv.status === "funded").length;
-    const onChain = liveInvoices.filter((inv) => inv.tokenId).length;
+    const onChain = myLiveInvoices.filter((inv) => inv.tokenId).length;
     return [
       { label: "Total Invoices",          value: String(total), icon: <InvoiceIcon />, color: "#1D4ED8", bg: "#DBEAFE", desc: `${onChain} on-chain` },
       { label: "Total Liquidity Received",value: `$${totalLiquidity.toLocaleString()}`, icon: <DollarIcon />,  color: "#15803D", bg: "#DCFCE7", desc: "Across all invoices" },

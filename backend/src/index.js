@@ -3,15 +3,23 @@ import express from "express";
 import cors from "cors";
 import invoiceRoutes from "./routes/invoice.routes.js";
 import listingRoutes from "./routes/listing.routes.js";
+import paymentRoutes from "./routes/payment.routes.js";
+import webhookRoutes from "./routes/webhook.routes.js";
 
 const app = express();
 app.use(cors());
+
+// Webhook routes MUST be mounted BEFORE express.json() so the raw body is preserved
+// for Razorpay HMAC signature verification. The route itself uses express.raw().
+app.use("/webhook", webhookRoutes);
+
 app.use(express.json());
 
 app.use("/", invoiceRoutes);
 app.use("/api", invoiceRoutes);
 app.use("/", listingRoutes);
 app.use("/api", listingRoutes);
+app.use("/api", paymentRoutes);
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });

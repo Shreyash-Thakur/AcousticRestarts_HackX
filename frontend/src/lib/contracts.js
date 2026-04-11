@@ -37,10 +37,8 @@ export const getFundingPool = (s) => new ethers.Contract(ADDRESSES.FundingPool, 
 
 /* ── Read-only provider (no wallet needed) ── */
 const RPC = "https://sepolia.base.org";
-let _readProvider = null;
 export function getReadProvider() {
-  if (!_readProvider) _readProvider = new ethers.JsonRpcProvider(RPC);
-  return _readProvider;
+  return new ethers.JsonRpcProvider(RPC);
 }
 export const getInvoTokenRead   = () => getInvoToken(getReadProvider());
 export const getFundingPoolRead = () => getFundingPool(getReadProvider());

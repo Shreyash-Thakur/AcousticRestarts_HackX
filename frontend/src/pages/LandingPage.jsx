@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { useWeb3 } from "../context/Web3Context";
 import { platformStats as fallbackStats } from "../data/mockData";
 import { fetchStats } from "../lib/api";
 import Footer from "../components/Footer";
@@ -198,6 +199,7 @@ function HeroDotGrid({ mousePosRef }) {
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const { userRole } = useWeb3();
   const [stats, setStats] = useState(fallbackStats);
 
   useEffect(() => {
@@ -323,14 +325,16 @@ export default function LandingPage() {
             </motion.p>
 
             <motion.div variants={fadeUp} style={{ display: "flex", gap: "0.85rem", justifyContent: "center", flexWrap: "wrap" }}>
-              <button
-                className="btn btn-gold btn-lg"
-                onClick={() => navigate("/upload")}
-                style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-              >
-                <UploadIcon />
-                Upload Invoice
-              </button>
+              {userRole !== "investor" && (
+                <button
+                  className="btn btn-gold btn-lg"
+                  onClick={() => navigate("/upload")}
+                  style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+                >
+                  <UploadIcon />
+                  Upload Invoice
+                </button>
+              )}
               <button
                 onClick={() => navigate("/marketplace")}
                 style={{
@@ -560,33 +564,35 @@ export default function LandingPage() {
 
             {/* Staggered buttons — first after heading settles, second 150ms later */}
             <div style={{ display: "flex", gap: "0.85rem", justifyContent: "center", flexWrap: "wrap" }}>
-              <motion.div
-                initial={{ opacity: 0, y: 14 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.42, duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
-              >
-                <button
-                  onClick={() => navigate("/upload")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: "0.5rem",
-                    padding: "0.9rem 2rem",
-                    borderRadius: "var(--radius)",
-                    background: "#fff",
-                    color: "var(--gold)",
-                    border: "none",
-                    fontSize: "1rem",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    fontFamily: "var(--font-body)",
-                    transition: "all 0.18s",
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "#F0FDF4"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.transform = "translateY(0)"; }}
+              {userRole !== "investor" && (
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: 0.42, duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
                 >
-                  <UploadIcon /> Upload Invoice
-                </button>
-              </motion.div>
+                  <button
+                    onClick={() => navigate("/upload")}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "0.5rem",
+                      padding: "0.9rem 2rem",
+                      borderRadius: "var(--radius)",
+                      background: "#fff",
+                      color: "var(--gold)",
+                      border: "none",
+                      fontSize: "1rem",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      fontFamily: "var(--font-body)",
+                      transition: "all 0.18s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "#F0FDF4"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.transform = "translateY(0)"; }}
+                  >
+                    <UploadIcon /> Upload Invoice
+                  </button>
+                </motion.div>
+              )}
 
               <motion.div
                 initial={{ opacity: 0, y: 14 }}
