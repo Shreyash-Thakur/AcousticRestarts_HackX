@@ -1,49 +1,180 @@
 # InvoFlow
 
-The Folder Structure 
+InvoFlow is a decentralized invoice financing platform for SMEs.
+
+It tokenizes verified invoices, enables fractional investor funding, and settles repayments with transparent on-chain logic.
+
+## Core Outcome
+
+- SMEs unlock working capital earlier instead of waiting for invoice due dates.
+- Investors access short-duration, yield-bearing invoice positions.
+- Funding, fees, and settlement are enforced by smart contracts.
+
+## Architecture
+
+### Frontend
+
+- React + Vite application in `frontend/`
+- Pages for landing, upload, marketplace, invoice detail, SME dashboard, and investor dashboard
+
+### Backend API
+
+- Express API in `backend/src/`
+- Unified invoice response layer combining metadata, risk insights, cashflow simulation, and optional on-chain state
+- API contract documented in `backend/API_CONTRACT.md`
+
+### Smart Contracts
+
+- `InvoToken.sol`: ERC-3525 style invoice token model (`ID`, `SLOT`, `VALUE`)
+- `FundingPool.sol`: fractional USDC funding, origination fee deduction, settlement, investor claims
+- `InvoPaymaster.sol`: ERC-4337 paymaster flow for gas sponsorship
+- `ChainlinkGSTVerifier.sol`: Chainlink Functions-based GST IRN verification gate before minting
+
+### ZK Layer
+
+- Circuit scaffold and proof script in `backend/zk/`
+- Designed for proving risk eligibility without exposing raw sensitive business data on-chain
+
+## Current Status
+
+Implemented and working:
+
+- Contract code for tokenization and funding lifecycle
+- Contract tests for minting, funding, settlement, claims, default, and fee logic
+- Backend API for invoice create/list/detail/stats with validation and normalization
+- Full frontend product flow with role-based pages
+
+Scaffolded for integration:
+
+- Live GST verification service integration
+- Live payment webhook settlement integration
+- Live smart wallet / gasless transaction service integration
+- Full risk proof generation pipeline wiring
+
+## Repository Structure
+
+```text
 AcousticRestarts_HackX/
-├── .gitignore
 ├── README.md
-│
-├── backend/                          ← contracts + server merged
-│   ├── contracts/
-│   │   ├── core/
-│   │   │   ├── InvoToken.sol         ← ERC-3525 SFT (ID/SLOT/VALUE invoice token)
-│   │   │   ├── FundingPool.sol       ← fractional USDC funding + fee deduction
-│   │   │   ├── InvoPaymaster.sol     ← ERC-4337 gasless sponsorship
-│   │   │   └── ChainlinkGSTVerifier.sol  ← Chainlink Functions IRN oracle
-│   │   ├── interfaces/
-│   │   │   ├── IERC3525.sol
-│   │   │   └── IFundingPool.sol
-│   │   └── mocks/
-│   │       └── MockUSDC.sol
-│   ├── src/                          ← Express API server
-│   │   ├── index.js
-│   │   ├── routes/
-│   │   ├── controllers/
-│   │   ├── services/
-│   │   │   ├── gst.service.js        ← Decentro/Sandbox IRN verification
-│   │   │   ├── payment.service.js    ← virtual bank account via Decentro/RazorpayX
-│   │   │   ├── biconomy.service.js   ← smart wallet + gasless AA
-│   │   │   └── riskEngine.service.js ← off-chain ML score + ZK proof dispatch
-│   │   └── middleware/
-│   ├── zk/
-│   │   ├── circuits/riskScore.circom ← Groth16 trust-score circuit
-│   │   └── scripts/generateProof.js
-│   ├── scripts/deploy.js
-│   ├── test/
-│   ├── hardhat.config.js             ← Base Sepolia + Polygon Amoy networks
+├── backend/
+│   ├── API_CONTRACT.md
+│   ├── hardhat.config.cjs
 │   ├── package.json
-│   └── .env.example
-│
-└── client/                           ← Next.js 14 frontend
-    ├── src/
-    │   ├── app/
-    │   ├── components/
-    │   │   ├── InvoiceUpload.jsx
-    │   │   ├── SMEDashboard.jsx
-    │   │   └── InvestorDashboard.jsx
-    │   ├── hooks/useInvoices.js
-    │   └── lib/api.js
+│   ├── contracts/
+│   ├── data/
+│   ├── scripts/
+│   ├── src/
+│   ├── test/
+│   └── zk/
+└── frontend/
     ├── package.json
-    └── .env.example
+    ├── vite.config.js
+    └── src/
+```
+
+## Local Setup
+
+### Prerequisites
+
+- Node.js 18+
+- npm 9+
+
+### 1) Install dependencies
+
+```bash
+cd backend
+npm install
+
+cd ../frontend
+npm install
+```
+
+### 2) Run backend
+
+```bash
+cd backend
+npm run dev
+```
+
+Backend defaults to port `4000`.
+
+### 3) Run frontend
+
+```bash
+cd frontend
+npm run dev
+```
+
+Frontend runs on Vite dev server (typically port `5173`).
+
+## Environment Configuration
+
+Create `backend/.env` and set values as needed:
+
+```env
+PORT=4000
+
+# Optional explicit toggle
+BLOCKCHAIN_ENABLED=true
+
+# RPC and contract config
+RPC_URL=
+BASE_SEPOLIA_RPC_URL=
+POLYGON_AMOY_RPC_URL=
+CONTRACT_ADDRESS=
+INVOICE_CONTRACT_ADDRESS=
+
+# Deployment
+DEPLOYER_PRIVATE_KEY=
+ETHERSCAN_API_KEY=
+```
+
+If `BLOCKCHAIN_ENABLED` is not set, backend auto-enables chain reads when RPC and contract address are configured.
+
+## API Summary
+
+Base URLs:
+
+- `/`
+- `/api`
+
+Endpoints:
+
+- `GET /health`
+- `GET /config`
+- `GET /stats`
+- `GET /invoices`
+- `GET /invoice/:id`
+- `POST /invoice`
+
+Compatibility aliases:
+
+- `POST /invoices`
+- `GET /invoice`
+
+See `backend/API_CONTRACT.md` for response fields and validation rules.
+
+## Smart Contract Commands
+
+From `backend/`:
+
+```bash
+npm run compile
+npm run test:contracts
+```
+
+Network deploy commands:
+
+```bash
+npm run deploy:base-sepolia
+npm run deploy:polygon-amoy
+```
+
+## Business Model
+
+FundingPool supports an origination fee in the `0.5% - 1.0%` range, deducted on full funding before SME disbursement.
+
+## Notes for Evaluators
+
+- This repo demonstrates protocol architecture and core contract-backed financing flow.
+- Some external service adapters are intentionally scaffolded and marked as not implemented where integration credentials or production provider wiring are required.
