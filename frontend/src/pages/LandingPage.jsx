@@ -1,7 +1,8 @@
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { useEffect, useRef, useState, useCallback } from "react";
-import { platformStats } from "../data/mockData";
+import { platformStats as fallbackStats } from "../data/mockData";
+import { fetchStats } from "../lib/api";
 import Footer from "../components/Footer";
 import RevealOnScroll from "../components/RevealOnScroll";
 
@@ -79,13 +80,6 @@ const features = [
   { icon: <LayersIcon />, title: "On-Chain Tokenization",   desc: "Every invoice becomes a transparent, auditable ERC-721 token.",           color: "#1D4ED8" },
   { icon: <ShieldIcon />, title: "AI Trust Scoring",        desc: "Multi-dimensional scoring across payment history, legitimacy, and profile.", color: "var(--gold)" },
   { icon: <TrendingIcon />,title:"Yield Optimization",      desc: "Filter by yield, risk, and maturity to build your ideal portfolio.",        color: "#B45309" },
-];
-
-const statItems = [
-  { label: "Total Funded",     value: platformStats.totalFunded     },
-  { label: "Active Invoices",  value: platformStats.activeInvoices  },
-  { label: "Average Yield",    value: platformStats.avgYield        },
-  { label: "Avg. Trust Score", value: platformStats.avgTrustScore   },
 ];
 
 /* ── Parse stat string → { prefix, num, suffix, decimals } ── */
@@ -204,6 +198,22 @@ function HeroDotGrid({ mousePosRef }) {
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const [stats, setStats] = useState(fallbackStats);
+
+  useEffect(() => {
+    fetchStats()
+      .then((data) => {
+        if (data && data.totalFunded) setStats(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  const statItems = [
+    { label: "Total Funded",     value: stats.totalFunded,     note: "Across all invoices" },
+    { label: "Active Invoices",  value: stats.activeInvoices,  note: "Currently raising" },
+    { label: "Average Yield",    value: stats.avgYield,        note: "Annualized return" },
+    { label: "Avg. Trust Score", value: stats.avgTrustScore,   note: "Out of 100" },
+  ];
 
   /* ── Hero mouse tracking ── */
   const heroRef      = useRef(null);

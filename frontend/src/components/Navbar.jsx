@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { useWeb3 } from "../context/Web3Context";
 
 const LogoMark = () => (
   <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
@@ -36,9 +37,13 @@ const navLinks = [
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
-  const [connected, setConnected] = useState(false);
+  const { account, isConnected, isCorrectChain, connecting, connectWallet, disconnectWallet } = useWeb3();
   const location = useLocation();
   const isActive = (path) => location.pathname === path;
+
+  const truncatedAddress = account
+    ? `${account.slice(0, 6)}…${account.slice(-4)}`
+    : "";
 
   return (
     <>
@@ -92,7 +97,7 @@ export default function Navbar() {
           {/* Wallet + hamburger */}
           <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
             <button
-              onClick={() => setConnected(!connected)}
+              onClick={isConnected ? disconnectWallet : connectWallet}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -101,18 +106,18 @@ export default function Navbar() {
                 borderRadius: "8px",
                 fontSize: "0.85rem",
                 fontWeight: 600,
-                border: connected
+                border: isConnected
                   ? "1.5px solid var(--gold-glow)"
                   : "1.5px solid rgba(28,25,23,0.18)",
-                background: connected ? "var(--gold-dim)" : "var(--gold)",
-                color: connected ? "var(--gold)" : "#fff",
+                background: isConnected ? "var(--gold-dim)" : "var(--gold)",
+                color: isConnected ? "var(--gold)" : "#fff",
                 cursor: "pointer",
                 transition: "all 0.15s",
                 whiteSpace: "nowrap",
               }}
             >
               <WalletIcon />
-              {connected ? "0x4A2b…C8d1" : "Connect Wallet"}
+              {connecting ? "Connecting…" : isConnected ? (isCorrectChain ? truncatedAddress : "Wrong Network") : "Connect Wallet"}
             </button>
 
             <button

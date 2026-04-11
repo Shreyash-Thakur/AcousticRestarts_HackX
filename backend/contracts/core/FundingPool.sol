@@ -3,8 +3,6 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../interfaces/IFundingPool.sol";
 
 /**
@@ -37,19 +35,17 @@ interface IInvoToken {
 
 /**
  * @title  FundingPool
- * @notice Fractional USDC funding pool for ERC-3525 invoice tokens.
+ * @notice Fractional native-ETH funding pool for ERC-3525 invoice tokens.
  *
  *         Flow:
  *         1. Admin opens funding for a verified invoice token
- *         2. Investors deposit USDC (fractional, any amount up to target)
+ *         2. Investors deposit ETH (fractional, any amount up to target)
  *         3. When fully funded → deduct platform fee → disburse to SME
  *         4. On fiat settlement (webhook) → yields deposited → investors claim
  *
  *         Revenue: 0.5 – 1.0 % origination fee on fully-funded amount.
  */
 contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
-    using SafeERC20 for IERC20;
-
     // ═══════════════════════════════════════════════════════════════
     //  Roles
     // ═══════════════════════════════════════════════════════════════
@@ -61,7 +57,6 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
     // ═══════════════════════════════════════════════════════════════
 
     IInvoToken public immutable invoToken;
-    IERC20 public immutable usdc;
     address public feeRecipient;
     uint256 public feeBps; // basis points, e.g. 50 = 0.5%, 100 = 1.0%
 
@@ -89,18 +84,15 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
 
     constructor(
         address _invoToken,
-        address _usdc,
         address _admin,
         address _feeRecipient,
         uint256 _feeBps
     ) {
         require(_invoToken != address(0), "FundingPool: zero invoToken");
-        require(_usdc != address(0), "FundingPool: zero usdc");
         require(_feeRecipient != address(0), "FundingPool: zero feeRecipient");
         require(_feeBps <= MAX_FEE_BPS, "FundingPool: fee too high");
 
         invoToken = IInvoToken(_invoToken);
-        usdc = IERC20(_usdc);
         feeRecipient = _feeRecipient;
         feeBps = _feeBps;
 
@@ -155,19 +147,25 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
     // ═══════════════════════════════════════════════════════════════
 
     /// @inheritdoc IFundingPool
-    function invest(uint256 tokenId, uint256 amount) external nonReentrant {
+    function invest(uint256 tokenId) external payable nonReentrant {
         FundingInfo storage f = _fundings[tokenId];
         require(f.targetAmount > 0, "FundingPool: not open");
         require(!f.fullyFunded, "FundingPool: already funded");
-        require(amount > 0, "FundingPool: zero amount");
+        require(msg.value > 0, "FundingPool: zero amount");
 
         uint256 remaining = f.targetAmount - f.fundedAmount;
-        uint256 actual = amount > remaining ? remaining : amount;
+        uint256 actual = msg.value > remaining ? remaining : msg.value;
 
-        // Pull USDC from investor
-        usdc.safeTransferFrom(msg.sender, address(this), actual);
         f.fundedAmount += actual;
         _investments[msg.sender][tokenId] += actual;
+
+        // Refund excess ETH
+        if (msg.value > actual) {
+            (bool refunded, ) = payable(msg.sender).call{
+                value: msg.value - actual
+            }("");
+            require(refunded, "FundingPool: refund failed");
+        }
 
         emit InvestmentMade(tokenId, msg.sender, actual);
 
@@ -183,31 +181,27 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
     // ═══════════════════════════════════════════════════════════════
 
     /// @inheritdoc IFundingPool
-    /// @dev The settler deposits the FULL repayment amount (investor principal + yield).
-    ///      When the buyer pays fiat, the webhook service converts it to USDC and
-    ///      calls this function. `totalRepayment` >= targetAmount.
+    /// @dev The settler deposits the FULL repayment amount (investor principal + yield)
+    ///      as native ETH. `msg.value` >= targetAmount.
     function settleInvoice(
-        uint256 tokenId,
-        uint256 totalRepayment
-    ) external onlyRole(SETTLER_ROLE) nonReentrant {
+        uint256 tokenId
+    ) external payable onlyRole(SETTLER_ROLE) nonReentrant {
         FundingInfo storage f = _fundings[tokenId];
         require(f.fullyFunded, "FundingPool: not funded");
         require(!f.settled, "FundingPool: already settled");
         require(!f.defaulted, "FundingPool: defaulted");
         require(
-            totalRepayment >= f.targetAmount,
+            msg.value >= f.targetAmount,
             "FundingPool: repayment below principal"
         );
 
-        // Pull full repayment USDC from settler
-        usdc.safeTransferFrom(msg.sender, address(this), totalRepayment);
-        _repayments[tokenId] = totalRepayment;
+        _repayments[tokenId] = msg.value;
         f.settled = true;
 
         // Update invoice status on InvoToken
         invoToken.setInvoiceStatus(tokenId, IInvoToken.InvoiceStatus.Settled);
 
-        emit InvoiceSettled(tokenId, totalRepayment);
+        emit InvoiceSettled(tokenId, msg.value);
     }
 
     /// @inheritdoc IFundingPool
@@ -243,7 +237,8 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
         // Pro-rata share of total repayment (principal + yield)
         uint256 payout = (_repayments[tokenId] * invested) / f.targetAmount;
 
-        usdc.safeTransfer(msg.sender, payout);
+        (bool sent, ) = payable(msg.sender).call{value: payout}("");
+        require(sent, "FundingPool: ETH transfer failed");
 
         emit InvestorWithdrawal(tokenId, msg.sender, payout);
     }
@@ -274,6 +269,34 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  5. Secondary Market — Position Transfer
+    // ═══════════════════════════════════════════════════════════════
+
+    /// @inheritdoc IFundingPool
+    function transferInvestment(
+        uint256 tokenId,
+        address to,
+        uint256 amount
+    ) external nonReentrant {
+        require(to != address(0), "FundingPool: zero address");
+        require(to != msg.sender, "FundingPool: self transfer");
+        require(amount > 0, "FundingPool: zero amount");
+
+        FundingInfo storage f = _fundings[tokenId];
+        require(f.targetAmount > 0, "FundingPool: not open");
+        require(!f.settled, "FundingPool: already settled");
+        require(!f.defaulted, "FundingPool: defaulted");
+
+        uint256 balance = _investments[msg.sender][tokenId];
+        require(balance >= amount, "FundingPool: insufficient position");
+
+        _investments[msg.sender][tokenId] -= amount;
+        _investments[to][tokenId] += amount;
+
+        emit PositionTransferred(tokenId, msg.sender, to, amount);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Internal
     // ═══════════════════════════════════════════════════════════════
 
@@ -292,11 +315,13 @@ contract FundingPool is AccessControl, ReentrancyGuard, IFundingPool {
 
         // Platform fee
         if (fee > 0) {
-            usdc.safeTransfer(feeRecipient, fee);
+            (bool feeSent, ) = payable(feeRecipient).call{value: fee}("");
+            require(feeSent, "FundingPool: fee transfer failed");
         }
 
         // Principal to SME
-        usdc.safeTransfer(inv.smeWallet, net);
+        (bool smeSent, ) = payable(inv.smeWallet).call{value: net}("");
+        require(smeSent, "FundingPool: SME transfer failed");
 
         // Update invoice status
         invoToken.setInvoiceStatus(tokenId, IInvoToken.InvoiceStatus.Funded);

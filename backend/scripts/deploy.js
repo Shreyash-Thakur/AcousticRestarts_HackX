@@ -48,7 +48,6 @@ async function main() {
   const FundingPool = await ethers.getContractFactory("FundingPool");
   const fundingPool = await FundingPool.deploy(
     invoTokenAddr,
-    BASE_SEPOLIA.USDC,
     deployer.address, // admin
     deployer.address, // feeRecipient
     50                // 0.5 % origination fee

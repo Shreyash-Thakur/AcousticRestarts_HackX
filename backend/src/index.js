@@ -1,9 +1,8 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import invoiceRoutes from "./routes/invoice.routes.js";
-
-dotenv.config();
+import listingRoutes from "./routes/listing.routes.js";
 
 const app = express();
 app.use(cors());
@@ -11,6 +10,8 @@ app.use(express.json());
 
 app.use("/", invoiceRoutes);
 app.use("/api", invoiceRoutes);
+app.use("/", listingRoutes);
+app.use("/api", listingRoutes);
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });

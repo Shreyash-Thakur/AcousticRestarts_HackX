@@ -2,10 +2,10 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
 describe("FundingPool", () => {
-  let invoToken, mockUSDC, fundingPool;
+  let invoToken, fundingPool;
   let admin, sme, investor1, investor2, feeWallet;
   const SLOT = 1001n;
-  const AMOUNT = 100_000_000n; // 100 USDC
+  const AMOUNT = ethers.parseUnits("1", 6); // 1_000_000 (6 decimals in InvoToken VALUE)
   const IRN = "INV-2024-00001";
   const FEE_BPS = 50n; // 0.5%
 
@@ -16,15 +16,10 @@ describe("FundingPool", () => {
     const InvoToken = await ethers.getContractFactory("InvoToken");
     invoToken = await InvoToken.deploy(admin.address);
 
-    // Deploy MockUSDC
-    const MockUSDC = await ethers.getContractFactory("MockUSDC");
-    mockUSDC = await MockUSDC.deploy();
-
-    // Deploy FundingPool
+    // Deploy FundingPool (no USDC — uses native ETH)
     const FundingPool = await ethers.getContractFactory("FundingPool");
     fundingPool = await FundingPool.deploy(
       await invoToken.getAddress(),
-      await mockUSDC.getAddress(),
       admin.address,
       feeWallet.address,
       FEE_BPS
@@ -37,10 +32,6 @@ describe("FundingPool", () => {
     // Mint a verified invoice
     const dueDate = BigInt(Math.floor(Date.now() / 1000) + 86400 * 30);
     await invoToken.mintInvoice(sme.address, SLOT, IRN, AMOUNT, dueDate);
-
-    // Mint USDC to investors
-    await mockUSDC.mint(investor1.address, 500_000_000n); // 500 USDC
-    await mockUSDC.mint(investor2.address, 500_000_000n);
   });
 
   // ─── Open Funding ──────────────────────────────────────────
@@ -61,12 +52,11 @@ describe("FundingPool", () => {
 
   // ─── Investing ─────────────────────────────────────────────
 
-  it("should allow fractional USDC investment", async () => {
+  it("should allow fractional ETH investment", async () => {
     await fundingPool.openFunding(1n);
 
-    const investAmount = 40_000_000n; // 40 USDC
-    await mockUSDC.connect(investor1).approve(await fundingPool.getAddress(), investAmount);
-    await fundingPool.connect(investor1).invest(1n, investAmount);
+    const investAmount = 400_000n; // 0.4 of target
+    await fundingPool.connect(investor1).invest(1n, { value: investAmount });
 
     const info = await fundingPool.getFundingInfo(1n);
     expect(info.fundedAmount).to.equal(investAmount);
@@ -75,17 +65,24 @@ describe("FundingPool", () => {
     expect(await fundingPool.getInvestment(investor1.address, 1n)).to.equal(investAmount);
   });
 
-  it("should cap investment at remaining amount", async () => {
+  it("should cap investment at remaining amount and refund excess", async () => {
     await fundingPool.openFunding(1n);
 
     // Try to invest more than the target
-    await mockUSDC.connect(investor1).approve(await fundingPool.getAddress(), 200_000_000n);
-    await fundingPool.connect(investor1).invest(1n, 200_000_000n);
+    const overAmount = 2_000_000n;
+    const balBefore = await ethers.provider.getBalance(investor1.address);
+    const tx = await fundingPool.connect(investor1).invest(1n, { value: overAmount });
+    const receipt = await tx.wait();
+    const gasUsed = receipt.gasUsed * receipt.gasPrice;
+    const balAfter = await ethers.provider.getBalance(investor1.address);
 
-    // Should only take 100 USDC (the target)
+    // Should only take AMOUNT (the target), excess refunded
     expect(await fundingPool.getInvestment(investor1.address, 1n)).to.equal(AMOUNT);
     const info = await fundingPool.getFundingInfo(1n);
     expect(info.fullyFunded).to.be.true;
+
+    // Balance should decrease by exactly AMOUNT + gas, not overAmount
+    expect(balBefore - balAfter).to.equal(AMOUNT + gasUsed);
   });
 
   // ─── Full Funding ──────────────────────────────────────────
@@ -93,22 +90,18 @@ describe("FundingPool", () => {
   it("should disburse principal minus fee to SME on full funding", async () => {
     await fundingPool.openFunding(1n);
 
-    const poolAddr = await fundingPool.getAddress();
-    await mockUSDC.connect(investor1).approve(poolAddr, 60_000_000n);
-    await mockUSDC.connect(investor2).approve(poolAddr, 40_000_000n);
+    await fundingPool.connect(investor1).invest(1n, { value: 600_000n });
 
-    await fundingPool.connect(investor1).invest(1n, 60_000_000n);
+    const smeBefore = await ethers.provider.getBalance(sme.address);
+    const feeBefore = await ethers.provider.getBalance(feeWallet.address);
 
-    const smeBefore = await mockUSDC.balanceOf(sme.address);
-    const feeBefore = await mockUSDC.balanceOf(feeWallet.address);
+    await fundingPool.connect(investor2).invest(1n, { value: 400_000n });
 
-    await fundingPool.connect(investor2).invest(1n, 40_000_000n);
-
-    const expectedFee = (AMOUNT * FEE_BPS) / 10_000n; // 500_000 = 0.5 USDC
+    const expectedFee = (AMOUNT * FEE_BPS) / 10_000n; // 50 = 0.005%
     const expectedNet = AMOUNT - expectedFee;
 
-    expect(await mockUSDC.balanceOf(sme.address)).to.equal(smeBefore + expectedNet);
-    expect(await mockUSDC.balanceOf(feeWallet.address)).to.equal(feeBefore + expectedFee);
+    expect(await ethers.provider.getBalance(sme.address)).to.equal(smeBefore + expectedNet);
+    expect(await ethers.provider.getBalance(feeWallet.address)).to.equal(feeBefore + expectedFee);
 
     // Invoice status should now be Funded
     const inv = await invoToken.getInvoice(1n);
@@ -117,14 +110,11 @@ describe("FundingPool", () => {
 
   it("should revert investing after fully funded", async () => {
     await fundingPool.openFunding(1n);
-    const poolAddr = await fundingPool.getAddress();
 
-    await mockUSDC.connect(investor1).approve(poolAddr, AMOUNT);
-    await fundingPool.connect(investor1).invest(1n, AMOUNT);
+    await fundingPool.connect(investor1).invest(1n, { value: AMOUNT });
 
-    await mockUSDC.connect(investor2).approve(poolAddr, 1_000_000n);
     await expect(
-      fundingPool.connect(investor2).invest(1n, 1_000_000n)
+      fundingPool.connect(investor2).invest(1n, { value: 100_000n })
     ).to.be.revertedWith("FundingPool: already funded");
   });
 
@@ -132,47 +122,42 @@ describe("FundingPool", () => {
 
   it("should settle and allow investors to claim pro-rata returns", async () => {
     await fundingPool.openFunding(1n);
-    const poolAddr = await fundingPool.getAddress();
 
     // Two investors: 60 / 40 split
-    await mockUSDC.connect(investor1).approve(poolAddr, 60_000_000n);
-    await mockUSDC.connect(investor2).approve(poolAddr, 40_000_000n);
-    await fundingPool.connect(investor1).invest(1n, 60_000_000n);
-    await fundingPool.connect(investor2).invest(1n, 40_000_000n);
+    await fundingPool.connect(investor1).invest(1n, { value: 600_000n });
+    await fundingPool.connect(investor2).invest(1n, { value: 400_000n });
 
-    // Settlement: buyer paid fiat → 100 USDC principal + 5 USDC yield = 105 total
-    const totalRepayment = 105_000_000n;
-    await mockUSDC.mint(admin.address, totalRepayment);
-    await mockUSDC.connect(admin).approve(poolAddr, totalRepayment);
-    await fundingPool.settleInvoice(1n, totalRepayment);
+    // Settlement: principal + 5% yield = 1_050_000
+    const totalRepayment = 1_050_000n;
+    await fundingPool.settleInvoice(1n, { value: totalRepayment });
 
     // Invoice should be Settled
     const inv = await invoToken.getInvoice(1n);
     expect(inv.status).to.equal(2); // Settled
 
-    // Investor1 claims: 60 principal + 60% of 5 yield = 60 + 3 = 63 USDC
-    const bal1Before = await mockUSDC.balanceOf(investor1.address);
-    await fundingPool.connect(investor1).claimReturns(1n);
-    const bal1After = await mockUSDC.balanceOf(investor1.address);
-    expect(bal1After - bal1Before).to.equal(60_000_000n + 3_000_000n);
+    // Investor1 claims: 60% of 1_050_000 = 630_000
+    const bal1Before = await ethers.provider.getBalance(investor1.address);
+    const tx1 = await fundingPool.connect(investor1).claimReturns(1n);
+    const r1 = await tx1.wait();
+    const gas1 = r1.gasUsed * r1.gasPrice;
+    const bal1After = await ethers.provider.getBalance(investor1.address);
+    expect(bal1After - bal1Before + gas1).to.equal(630_000n);
 
-    // Investor2 claims: 40 principal + 40% of 5 yield = 40 + 2 = 42 USDC
-    const bal2Before = await mockUSDC.balanceOf(investor2.address);
-    await fundingPool.connect(investor2).claimReturns(1n);
-    const bal2After = await mockUSDC.balanceOf(investor2.address);
-    expect(bal2After - bal2Before).to.equal(40_000_000n + 2_000_000n);
+    // Investor2 claims: 40% of 1_050_000 = 420_000
+    const bal2Before = await ethers.provider.getBalance(investor2.address);
+    const tx2 = await fundingPool.connect(investor2).claimReturns(1n);
+    const r2 = await tx2.wait();
+    const gas2 = r2.gasUsed * r2.gasPrice;
+    const bal2After = await ethers.provider.getBalance(investor2.address);
+    expect(bal2After - bal2Before + gas2).to.equal(420_000n);
   });
 
   it("should revert double-claim", async () => {
     await fundingPool.openFunding(1n);
-    const poolAddr = await fundingPool.getAddress();
 
-    await mockUSDC.connect(investor1).approve(poolAddr, AMOUNT);
-    await fundingPool.connect(investor1).invest(1n, AMOUNT);
+    await fundingPool.connect(investor1).invest(1n, { value: AMOUNT });
 
-    await mockUSDC.mint(admin.address, 101_000_000n);
-    await mockUSDC.connect(admin).approve(poolAddr, 101_000_000n);
-    await fundingPool.settleInvoice(1n, 101_000_000n);
+    await fundingPool.settleInvoice(1n, { value: 1_010_000n });
 
     await fundingPool.connect(investor1).claimReturns(1n);
     await expect(
@@ -184,10 +169,8 @@ describe("FundingPool", () => {
 
   it("should mark invoice as defaulted", async () => {
     await fundingPool.openFunding(1n);
-    const poolAddr = await fundingPool.getAddress();
 
-    await mockUSDC.connect(investor1).approve(poolAddr, AMOUNT);
-    await fundingPool.connect(investor1).invest(1n, AMOUNT);
+    await fundingPool.connect(investor1).invest(1n, { value: AMOUNT });
 
     await fundingPool.markDefaulted(1n);
 

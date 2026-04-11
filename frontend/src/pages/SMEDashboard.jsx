@@ -1,8 +1,10 @@
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { smeInvoices } from "../data/mockData";
-import PageBackground from "../components/PageBackground";
-import RevealOnScroll from "../components/RevealOnScroll";
+import { smeInvoices as fallbackInvoices } from "../data/mockData";
+import { fetchInvoices } from "../lib/api";
+import { useWeb3 } from "../context/Web3Context";
+import { txUrl, tokenUrl } from "../lib/contracts";
 
 /* ── Icons ── */
 const PlusIcon = () => (
@@ -38,13 +40,6 @@ const ExternalIcon = () => (
   </svg>
 );
 
-const metrics = [
-  { label: "Total Invoices",          value: "4",        icon: <InvoiceIcon />, color: "#1D4ED8", bg: "#DBEAFE", desc: "All time" },
-  { label: "Total Liquidity Received",value: "$199,760", icon: <DollarIcon />,  color: "#15803D", bg: "#DCFCE7", desc: "Across all invoices" },
-  { label: "Outstanding Invoices",    value: "3",        icon: <ClockIcon />,   color: "#B45309", bg: "#FEF3C7", desc: "Actively funding" },
-  { label: "Settled Invoices",        value: "1",        icon: <CheckCircleIcon />, color: "#0D9488", bg: "#CCFBF1", desc: "Fully settled" },
-];
-
 const statusBadge = {
   draft:   <span className="badge badge-draft">Draft</span>,
   funding: <span className="badge badge-funding">Funding</span>,
@@ -56,19 +51,72 @@ const scoreColor = (s) => s >= 80 ? "#15803D" : s >= 60 ? "#B45309" : "#B91C1C";
 
 export default function SMEDashboard() {
   const navigate = useNavigate();
+  const { account, isConnected } = useWeb3();
+  const [liveInvoices, setLiveInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchInvoices()
+      .then((data) => {
+        const arr = Array.isArray(data) ? data : [];
+        // Normalize backend shape → frontend shape expected by the table
+        const normalized = arr.map((inv) => ({
+          id: String(inv.tokenId || inv.id),
+          invoiceNumber: inv.irn || `INV-${String(inv.tokenId || inv.id).padStart(3, "0")}`,
+          business: inv.businessName || inv.business || "",
+          clientName: inv.clientName || "",
+          amount: Number(inv.amount) || 0,
+          fundedAmount: Number(inv.fundedAmount) || 0,
+          fundedPercent: inv.amount > 0 ? Math.round((Number(inv.fundedAmount) / Number(inv.amount)) * 100) : 0,
+          trustScore: inv.riskScore ?? 75,
+          riskLevel: inv.riskLevel || "Medium",
+          dueDate: inv.dueDate ? new Date(inv.dueDate).toLocaleDateString("en-CA") : "",
+          status: (inv.status || "Pending").toLowerCase() === "pending" ? "draft"
+                : (inv.status || "").toLowerCase() === "funded" ? "funded"
+                : (inv.status || "").toLowerCase() === "paid" ? "settled"
+                : "funding",
+          yield: inv.returnRate || 10,
+          tokenId: inv.tokenId || null,
+          mintTxHash: inv.mintTxHash || null,
+          smeWallet: inv.smeWallet || null,
+          _source: "live",
+        }));
+        setLiveInvoices(normalized);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Merge: live invoices first, then mock data for demo richness
+  const smeInvoices = liveInvoices.length > 0
+    ? [...liveInvoices, ...fallbackInvoices]
+    : fallbackInvoices;
+
+  // Dynamic metrics from real data
+  const metrics = useMemo(() => {
+    const total = smeInvoices.length;
+    const totalLiquidity = smeInvoices.reduce((s, inv) => s + (inv.fundedAmount || 0), 0);
+    const outstanding = smeInvoices.filter((inv) => inv.status === "funding" || inv.status === "draft").length;
+    const settled = smeInvoices.filter((inv) => inv.status === "settled" || inv.status === "funded").length;
+    const onChain = liveInvoices.filter((inv) => inv.tokenId).length;
+    return [
+      { label: "Total Invoices",          value: String(total), icon: <InvoiceIcon />, color: "#1D4ED8", bg: "#DBEAFE", desc: `${onChain} on-chain` },
+      { label: "Total Liquidity Received",value: `$${totalLiquidity.toLocaleString()}`, icon: <DollarIcon />,  color: "#15803D", bg: "#DCFCE7", desc: "Across all invoices" },
+      { label: "Outstanding Invoices",    value: String(outstanding), icon: <ClockIcon />,   color: "#B45309", bg: "#FEF3C7", desc: "Actively funding" },
+      { label: "Settled Invoices",        value: String(settled), icon: <CheckCircleIcon />, color: "#0D9488", bg: "#CCFBF1", desc: "Fully settled" },
+    ];
+  }, [smeInvoices, liveInvoices]);
 
   return (
-    <PageBackground className="page" style={{ background: "var(--bg)" }}>
+    <div className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: "2.5rem", flexWrap: "wrap", gap: "1rem" }}>
           <div>
-            <RevealOnScroll>
-              <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
-                SME Dashboard
-              </h1>
-            </RevealOnScroll>
+            <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
+              SME Dashboard
+            </h1>
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>
               Manage your invoices and track liquidity
             </p>
@@ -112,7 +160,7 @@ export default function SMEDashboard() {
 
         {/* Invoice table */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.1rem" }}>
-          <RevealOnScroll><h2 style={{ fontSize: "1.15rem", fontWeight: 700, fontFamily: "var(--font-head)", color: "var(--text)" }}>Your Invoices</h2></RevealOnScroll>
+          <h2 style={{ fontSize: "1.15rem", fontWeight: 700, fontFamily: "var(--font-head)", color: "var(--text)" }}>Your Invoices</h2>
           <span style={{ fontSize: "0.82rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>{smeInvoices.length} invoices</span>
         </div>
 
@@ -125,6 +173,7 @@ export default function SMEDashboard() {
                 <th>Amount</th>
                 <th>Funded</th>
                 <th>Status</th>
+                <th>On-Chain</th>
                 <th>Due Date</th>
                 <th>Trust Score</th>
                 <th></th>
@@ -157,6 +206,21 @@ export default function SMEDashboard() {
                     </div>
                   </td>
                   <td>{statusBadge[inv.status]}</td>
+                  <td>
+                    {inv.tokenId ? (
+                      <a
+                        href={tokenUrl(inv.tokenId)}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ fontSize: "0.78rem", color: "#15803D", fontWeight: 600, fontFamily: "var(--font-body)", display: "flex", alignItems: "center", gap: "0.3rem" }}
+                      >
+                        #{inv.tokenId} <ExternalIcon />
+                      </a>
+                    ) : (
+                      <span style={{ fontSize: "0.78rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>—</span>
+                    )}
+                  </td>
                   <td style={{ fontFamily: "var(--font-body)" }}>{inv.dueDate}</td>
                   <td>
                     <span style={{ fontWeight: 700, color: scoreColor(inv.trustScore), fontFamily: "var(--font-body)" }}>
@@ -179,6 +243,6 @@ export default function SMEDashboard() {
         </div>
 
       </div>
-    </PageBackground>
+    </div>
   );
 }

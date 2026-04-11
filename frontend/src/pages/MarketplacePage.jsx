@@ -1,6 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { invoices } from "../data/mockData";
+import { invoices as mockInvoices } from "../data/mockData";
+import { fetchInvoices } from "../lib/api";
+import { getFundingPoolRead, formatTokenValue } from "../lib/contracts";
 import InvoiceCard from "../components/InvoiceCard";
 import PageBackground from "../components/PageBackground";
 import RevealOnScroll from "../components/RevealOnScroll";
@@ -40,6 +42,55 @@ export default function MarketplacePage() {
   const [minYield, setMinYield]         = useState("");
   const [maxAmount, setMaxAmount]       = useState("");
   const [showFilters, setShowFilters]   = useState(false);
+  const [liveInvoices, setLiveInvoices] = useState([]);
+
+  useEffect(() => {
+    fetchInvoices()
+      .then(async (data) => {
+        const arr = Array.isArray(data) ? data : [];
+        const pool = getFundingPoolRead();
+        const normalized = await Promise.all(arr.map(async (inv) => {
+          // Try to read on-chain funding progress
+          let fundedAmount = Number(inv.fundedAmount) || 0;
+          let fundedPercent = 0;
+          if (inv.tokenId) {
+            try {
+              const fi = await pool.getFundingInfo(inv.tokenId);
+              fundedAmount = formatTokenValue(fi.fundedAmount);
+              const target = formatTokenValue(fi.targetAmount);
+              fundedPercent = target > 0 ? Math.round((fundedAmount / target) * 100) : 0;
+            } catch { /* funding not opened */ }
+          }
+          if (!fundedPercent && inv.amount > 0) {
+            fundedPercent = Math.round((fundedAmount / Number(inv.amount)) * 100);
+          }
+          return {
+            id: String(inv.tokenId || inv.id),
+            business: inv.businessName || inv.business || "",
+            clientName: inv.clientName || "",
+            amount: Number(inv.amount) || 0,
+            fundedAmount,
+            fundedPercent,
+            trustScore: inv.riskScore ?? 75,
+            riskLevel: inv.riskLevel || "Medium",
+            yield: inv.returnRate || 10,
+            daysRemaining: inv.dueDate ? Math.max(0, Math.ceil((new Date(inv.dueDate) - Date.now()) / 86400000)) : 30,
+            status: fundedPercent >= 100 ? "funded" : "funding",
+            tokenId: inv.tokenId || null,
+            mintTxHash: inv.mintTxHash || null,
+            subScores: { paymentReliability: (inv.riskScore ?? 75) + 4, invoiceLegitimacy: (inv.riskScore ?? 75) + 1, businessProfile: (inv.riskScore ?? 75) - 5 },
+            funders: [],
+            _source: "live",
+          };
+        }));
+        setLiveInvoices(normalized);
+      })
+      .catch(() => {});
+  }, []);
+
+  const invoices = liveInvoices.length > 0
+    ? [...liveInvoices, ...mockInvoices]
+    : mockInvoices;
 
   const filtered = useMemo(() => {
     let list = invoices.filter((inv) => {
@@ -60,7 +111,7 @@ export default function MarketplacePage() {
         default: return 0;
       }
     });
-  }, [riskFilter, statusFilter, sortBy, minYield, maxAmount]);
+  }, [invoices, riskFilter, statusFilter, sortBy, minYield, maxAmount]);
 
   const activeFilters = [
     riskFilter !== "All" && { label: `Risk: ${riskFilter}`, clear: () => setRiskFilter("All") },

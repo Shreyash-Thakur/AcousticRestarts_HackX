@@ -11,7 +11,9 @@ const buildUnifiedInvoice = async (metadata) => {
 
   const risk = getRiskInsights(metadata.clientName);
   const cashflow = simulateCashflow(metadata.amount, metadata.dueDate);
-  const chainState = await getInvoiceOnChain(metadata.id, metadata.amount);
+  // Use stored tokenId (on-chain) if available, otherwise fall back to in-memory id
+  const chainLookupId = metadata.tokenId || metadata.id;
+  const chainState = await getInvoiceOnChain(chainLookupId, metadata.amount);
 
   const amount = Number(chainState.amount || metadata.amount || 0);
   const fundedAmount = Math.min(Number(chainState.fundedAmount || 0), amount);
@@ -32,6 +34,7 @@ const buildUnifiedInvoice = async (metadata) => {
     cashflow,
     createdAt: metadata.createdAt,
     blockchainAvailable: Boolean(chainState.blockchainAvailable),
+    tokenId: metadata.tokenId || chainState.tokenId || null,
   };
 };
 

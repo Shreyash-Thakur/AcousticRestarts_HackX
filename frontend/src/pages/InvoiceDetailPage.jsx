@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { invoices } from "../data/mockData";
+import { invoices as mockInvoices } from "../data/mockData";
+import { fetchInvoices, createListing, fetchListings, buyListingApi, cancelListingApi } from "../lib/api";
+import { useWeb3 } from "../context/Web3Context";
+import { getFundingPool, getFundingPoolRead, formatTokenValue, parseTokenValue, txUrl, ADDRESSES, FUNDING_POOL_DEPLOY_BLOCK, getReadProvider } from "../lib/contracts";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
 import PageBackground from "../components/PageBackground";
 import RevealOnScroll from "../components/RevealOnScroll";
@@ -40,15 +43,304 @@ const riskClass = (level) => `badge badge-${level.toLowerCase()}`;
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const invoice = invoices.find((inv) => inv.id === id);
+  const { signer, account, isConnected, isCorrectChain, connectWallet } = useWeb3();
+
+  const [liveInvoice, setLiveInvoice] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [chainFunding, setChainFunding] = useState(null); // { targetAmount, fundedAmount, fullyFunded, settled }
+  const [ethBalance, setEthBalance] = useState(0);
+  const [myPosition, setMyPosition] = useState(0);
 
   const [investAmount, setInvestAmount] = useState("");
   const [insurance, setInsurance] = useState(false);
   const [funded, setFunded] = useState(false);
-  const [listForSale, setListForSale] = useState(false);
+  const [fundingTx, setFundingTx] = useState("");
+  const [fundingLoading, setFundingLoading] = useState("");
 
-  const holdsPosition = ["INV-001", "INV-005"].includes(id);
-  const myPosition = holdsPosition ? 15000 : 0;
+  // Secondary market state
+  const [listForSale, setListForSale] = useState(false);
+  const [listingPrice, setListingPrice] = useState("");
+  const [listingLoading, setListingLoading] = useState("");
+  const [myListing, setMyListing] = useState(null); // active listing by this user
+  const [otherListings, setOtherListings] = useState([]); // listings by others
+  const [buyingId, setBuyingId] = useState(null);
+
+  const mockMatch = mockInvoices.find((inv) => inv.id === id);
+
+  // Fetch invoice from API if not in mock data
+  useEffect(() => {
+    if (!mockMatch) {
+      setLoading(true);
+      fetchInvoices()
+        .then((data) => {
+          const arr = Array.isArray(data) ? data : [];
+          const found = arr.find((inv) => String(inv.tokenId || inv.id) === id);
+          if (found) {
+            setLiveInvoice({
+              id: String(found.tokenId || found.id),
+              business: found.businessName || found.business || "",
+              invoiceNumber: found.irn || `INV-${String(found.id).padStart(3, "0")}`,
+              clientName: found.clientName || "",
+              amount: Number(found.amount) || 0,
+              fundedAmount: Number(found.fundedAmount) || 0,
+              fundedPercent: found.amount > 0 ? Math.round((Number(found.fundedAmount) / Number(found.amount)) * 100) : 0,
+              trustScore: found.riskScore ?? 75,
+              riskLevel: found.riskLevel || "Medium",
+              yield: found.returnRate || 10,
+              daysRemaining: found.dueDate ? Math.max(0, Math.ceil((new Date(found.dueDate) - Date.now()) / 86400000)) : 30,
+              dueDate: found.dueDate ? new Date(found.dueDate).toLocaleDateString("en-CA") : "",
+              issuedDate: found.createdAt ? new Date(found.createdAt).toLocaleDateString("en-CA") : new Date().toLocaleDateString("en-CA"),
+              status: "funding",
+              description: `Invoice from ${found.businessName || "SME"} to ${found.clientName || "client"}`,
+              subScores: { paymentReliability: (found.riskScore ?? 75) + 4, invoiceLegitimacy: (found.riskScore ?? 75) + 1, businessProfile: (found.riskScore ?? 75) - 5 },
+              funders: [],
+              insuranceAvailable: true,
+              tokenId: found.tokenId || null,
+              mintTxHash: found.mintTxHash || null,
+              smeWallet: found.smeWallet || null,
+            });
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }, [id, mockMatch]);
+
+  const invoice = mockMatch || liveInvoice;
+  const tokenId = liveInvoice?.tokenId || (mockMatch ? null : null);
+
+  const [funders, setFunders] = useState([]);
+
+  // Fetch on-chain funding info + funders from InvestmentMade events
+  useEffect(() => {
+    if (!tokenId) return;
+    const pool = getFundingPoolRead();
+    pool.getFundingInfo(tokenId)
+      .then((fi) => setChainFunding({
+        targetAmount: formatTokenValue(fi.targetAmount),
+        fundedAmount: formatTokenValue(fi.fundedAmount),
+        fullyFunded: fi.fullyFunded,
+        settled: fi.settled,
+      }))
+      .catch((e) => console.error("getFundingInfo error:", e));
+
+    // Query InvestmentMade events with bounded block range (RPC limits to 10k blocks)
+    (async () => {
+      try {
+        const provider = getReadProvider();
+        const latest = await provider.getBlockNumber();
+        // Scan from deploy block to latest, in 10k-block chunks
+        const fromBlock = FUNDING_POOL_DEPLOY_BLOCK;
+        const allEvents = [];
+        for (let start = fromBlock; start <= latest; start += 10000) {
+          const end = Math.min(start + 9999, latest);
+          const chunk = await pool.queryFilter(pool.filters.InvestmentMade(), start, end);
+          allEvents.push(...chunk);
+        }
+        console.log("[Funders] Total InvestmentMade events:", allEvents.length);
+        const map = {};
+        for (const ev of allEvents) {
+          const evTokenId = String(ev.args[0]);
+          const addr = ev.args[1];
+          const amt = ev.args[2];
+          if (evTokenId === String(tokenId)) {
+            map[addr] = (map[addr] || 0) + formatTokenValue(amt);
+          }
+        }
+        const list = Object.entries(map).map(([address, amount]) => ({ address, amount }));
+        console.log("[Funders] Funders for tokenId", tokenId, ":", list);
+        setFunders(list);
+      } catch (e) {
+        console.error("[Funders] queryFilter error:", e);
+      }
+    })();
+  }, [tokenId]);
+
+  useEffect(() => {
+    if (!account) return;
+    // Fetch native ETH balance
+    import("ethers").then(({ ethers }) => {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      provider.getBalance(account).then((b) => setEthBalance(Number(ethers.formatEther(b)))).catch(() => {});
+    });
+    if (tokenId) {
+      const pool = getFundingPoolRead();
+      pool.getInvestment(account, tokenId).then((a) => setMyPosition(formatTokenValue(a))).catch(() => {});
+    }
+  }, [account, tokenId]);
+
+  // Fetch secondary market listings for this token
+  const refreshListings = async () => {
+    if (!tokenId) return;
+    try {
+      const all = await fetchListings(tokenId);
+      if (account) {
+        const mine = all.find((l) => l.sellerWallet.toLowerCase() === account.toLowerCase());
+        setMyListing(mine || null);
+        if (mine) setListForSale(true);
+        setOtherListings(all.filter((l) => l.sellerWallet.toLowerCase() !== account.toLowerCase()));
+      } else {
+        setMyListing(null);
+        setOtherListings(all);
+      }
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { refreshListings(); }, [tokenId, account]);
+
+  // Overwrite fundedAmount/fundedPercent from chain if available
+  const realFundedAmount = chainFunding?.fundedAmount ?? invoice?.fundedAmount ?? 0;
+  const realAmount = chainFunding?.targetAmount ?? invoice?.amount ?? 0;
+  const realFundedPercent = realAmount > 0 ? Math.round((realFundedAmount / realAmount) * 100) : 0;
+
+  /* ── Fund on-chain ── */
+  const handleFund = async () => {
+    if (!isConnected) { connectWallet(); return; }
+    if (!isCorrectChain) { alert("Please switch to Base Sepolia network."); return; }
+    if (!tokenId) { alert("This invoice is not yet minted on-chain."); return; }
+
+    const parsedAmt = parseFloat(investAmount.replace(/,/g, "")) || 0;
+    if (parsedAmt <= 0) return;
+
+    setFundingLoading("Sending ETH…");
+    try {
+      const pool = getFundingPool(signer);
+      const amountWei = parseTokenValue(parsedAmt);
+
+      // Invest with ETH (payable — no approve needed)
+      setFundingLoading("Confirming investment…");
+      const investTx = await pool.invest(tokenId, { value: amountWei });
+      const receipt = await investTx.wait();
+
+      setFundingTx(receipt.hash);
+      setFunded(true);
+      setFundingLoading("");
+
+      // Refresh on-chain data
+      try {
+        const fi = await getFundingPoolRead().getFundingInfo(tokenId);
+        setChainFunding({
+          targetAmount: formatTokenValue(fi.targetAmount),
+          fundedAmount: formatTokenValue(fi.fundedAmount),
+          fullyFunded: fi.fullyFunded,
+          settled: fi.settled,
+        });
+        setMyPosition(prev => prev + parsedAmt);
+        // Refresh ETH balance
+        import("ethers").then(({ ethers }) => {
+          const provider = new ethers.BrowserProvider(window.ethereum);
+          provider.getBalance(account).then((b) => setEthBalance(Number(ethers.formatEther(b)))).catch(() => {});
+        });
+        // Refresh funders list from events (bounded range)
+        const poolRead = getFundingPoolRead();
+        const provider = getReadProvider();
+        const latest = await provider.getBlockNumber();
+        const allEvs = [];
+        for (let s = FUNDING_POOL_DEPLOY_BLOCK; s <= latest; s += 10000) {
+          const e = Math.min(s + 9999, latest);
+          const chunk = await poolRead.queryFilter(poolRead.filters.InvestmentMade(), s, e);
+          allEvs.push(...chunk);
+        }
+        const map = {};
+        for (const ev of allEvs) {
+          if (String(ev.args[0]) === String(tokenId)) {
+            const addr = ev.args[1];
+            map[addr] = (map[addr] || 0) + formatTokenValue(ev.args[2]);
+          }
+        }
+        setFunders(Object.entries(map).map(([address, amount]) => ({ address, amount })));
+      } catch { /* ignore */ }
+    } catch (err) {
+      console.error("Funding failed:", err);
+      setFundingLoading("");
+      alert(err?.reason || err?.message || "Transaction failed");
+    }
+  };
+
+  const holdsPosition = myPosition > 0;
+
+  /* ── List position for sale ── */
+  const handleListForSale = async () => {
+    if (!isConnected) { connectWallet(); return; }
+    if (!isCorrectChain) { alert("Please switch to Base Sepolia network."); return; }
+    if (!tokenId) return;
+
+    const price = parseFloat(listingPrice.replace(/,/g, "")) || 0;
+    if (price <= 0) { alert("Enter a valid asking price."); return; }
+
+    setListingLoading("Creating listing…");
+    try {
+      const listing = await createListing({
+        tokenId,
+        sellerWallet: account,
+        amount: myPosition,
+        askingPrice: price,
+      });
+      setMyListing(listing);
+      setListForSale(true);
+      setListingLoading("");
+      setListingPrice("");
+    } catch (err) {
+      setListingLoading("");
+      alert(err.message || "Failed to create listing");
+    }
+  };
+
+  /* ── Cancel listing ── */
+  const handleCancelListing = async () => {
+    if (!myListing) return;
+    try {
+      await cancelListingApi(myListing.id, account);
+      setMyListing(null);
+      setListForSale(false);
+      refreshListings();
+    } catch (err) {
+      alert(err.message || "Failed to cancel listing");
+    }
+  };
+
+  /* ── Buy a listed position ── */
+  const handleBuyListing = async (listing) => {
+    if (!isConnected) { connectWallet(); return; }
+    if (!isCorrectChain) { alert("Please switch to Base Sepolia network."); return; }
+
+    setBuyingId(listing.id);
+    try {
+      // Send ETH to the seller at the asking price
+      const { ethers } = await import("ethers");
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const senderSigner = await provider.getSigner();
+
+      const askWei = ethers.parseUnits(String(listing.askingPrice), 6);
+      const tx = await senderSigner.sendTransaction({
+        to: listing.sellerWallet,
+        value: askWei,
+      });
+      const receipt = await tx.wait();
+
+      // Mark listing as sold on backend
+      await buyListingApi(listing.id, { buyerWallet: account, txHash: receipt.hash });
+
+      alert("Position purchased! The seller will transfer the on-chain position to you.");
+      refreshListings();
+
+      // Refresh balances
+      provider.getBalance(account).then((b) => setEthBalance(Number(ethers.formatEther(b)))).catch(() => {});
+    } catch (err) {
+      console.error("Buy failed:", err);
+      alert(err?.reason || err?.message || "Purchase failed");
+    } finally {
+      setBuyingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="page" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <p style={{ fontSize: "1.1rem", color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>Loading invoice…</p>
+      </div>
+    );
+  }
 
   if (!invoice) {
     return (
@@ -64,17 +356,12 @@ export default function InvoiceDetailPage() {
   }
 
   const { business, invoiceNumber, amount, clientName, dueDate, issuedDate, fundedAmount, fundedPercent,
-          trustScore, riskLevel, yield: yld, daysRemaining, status, description, funders, subScores, insuranceAvailable } = invoice;
+          trustScore, riskLevel, yield: yld, daysRemaining, status, description, subScores, insuranceAvailable } = invoice;
 
-  const remaining = amount - fundedAmount;
+  const remaining = realAmount - realFundedAmount;
   const parsedAmount = parseFloat(investAmount.replace(/,/g, "")) || 0;
   const projectedReturn = parsedAmount * (yld / 100) * (daysRemaining / 365);
   const insurancePremium = insurance ? parsedAmount * 0.015 : 0;
-
-  const handleFund = () => {
-    if (!parsedAmount || parsedAmount > remaining) return;
-    setFunded(true);
-  };
 
   return (
     <PageBackground className="page" style={{ background: "var(--bg)" }}>
@@ -156,16 +443,21 @@ export default function InvoiceDetailPage() {
             <div className="card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
                 <span style={{ fontWeight: 700, fontFamily: "var(--font-head)", color: "var(--text)" }}>Funding Progress</span>
-                <span style={{ fontFamily: "var(--font-head)", fontSize: "1.2rem", color: "#15803D", fontWeight: 700 }}>{fundedPercent}%</span>
+                <span style={{ fontFamily: "var(--font-head)", fontSize: "1.2rem", color: "#15803D", fontWeight: 700 }}>{realFundedPercent}%</span>
               </div>
               <div className="progress-bar" style={{ height: 10, marginBottom: "1rem" }}>
-                <div className="progress-fill" style={{ width: `${fundedPercent}%` }} />
+                <div className="progress-fill" style={{ width: `${realFundedPercent}%` }} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", fontFamily: "var(--font-body)" }}>
-                <span style={{ color: "var(--text-muted)" }}>Raised: <strong style={{ color: "var(--text)" }}>${fundedAmount.toLocaleString()}</strong></span>
-                <span style={{ color: "var(--text-muted)" }}>Remaining: <strong style={{ color: "var(--text)" }}>${remaining.toLocaleString()}</strong></span>
-                <span style={{ color: "var(--text-muted)" }}>Target: <strong style={{ color: "var(--text)" }}>${amount.toLocaleString()}</strong></span>
+                <span style={{ color: "var(--text-muted)" }}>Raised: <strong style={{ color: "var(--text)" }}>${realFundedAmount.toLocaleString()}</strong></span>
+                <span style={{ color: "var(--text-muted)" }}>Remaining: <strong style={{ color: "var(--text)" }}>${Math.max(0, remaining).toLocaleString()}</strong></span>
+                <span style={{ color: "var(--text-muted)" }}>Target: <strong style={{ color: "var(--text)" }}>${realAmount.toLocaleString()}</strong></span>
               </div>
+              {chainFunding && (
+                <p style={{ fontSize: "0.72rem", color: "#15803D", marginTop: "0.5rem", fontFamily: "var(--font-body)" }}>
+                  ✓ Live on-chain data from Base Sepolia
+                </p>
+              )}
             </div>
 
             {/* Funders */}
@@ -194,7 +486,12 @@ export default function InvoiceDetailPage() {
                       borderRadius: "8px",
                       border: "1px solid var(--border)",
                     }}>
-                      <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontFamily: "monospace" }}>{f.address}</span>
+                      <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontFamily: "monospace" }}>
+                        {f.address.slice(0, 6)}…{f.address.slice(-4)}
+                        {account && f.address.toLowerCase() === account.toLowerCase() && (
+                          <span style={{ color: "#15803D", fontFamily: "var(--font-body)", marginLeft: "0.5rem", fontSize: "0.75rem" }}>(You)</span>
+                        )}
+                      </span>
                       <span style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-body)" }}>
                         ${f.amount.toLocaleString()}
                       </span>
@@ -300,11 +597,16 @@ export default function InvoiceDetailPage() {
                 <button
                   className="btn btn-gold"
                   style={{ width: "100%", justifyContent: "center" }}
-                  disabled={!parsedAmount || parsedAmount > remaining || parsedAmount < 1}
+                  disabled={!isConnected || !parsedAmount || parsedAmount > remaining || parsedAmount < 1 || !!fundingLoading}
                   onClick={handleFund}
                 >
-                  Fund This Invoice
+                  {fundingLoading || (!isConnected ? "Connect Wallet First" : "Fund This Invoice")}
                 </button>
+                {isConnected && ethBalance !== null && (
+                  <p style={{ fontSize: "0.74rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.4rem", fontFamily: "var(--font-body)" }}>
+                    Your ETH balance: <strong>{ethBalance.toFixed(4)} ETH</strong>
+                  </p>
+                )}
                 <p style={{ fontSize: "0.74rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.6rem", display: "flex", alignItems: "center", gap: "0.3rem", justifyContent: "center", fontFamily: "var(--font-body)" }}>
                   <InfoIcon /> Funds held in escrow until invoice settles
                 </p>
@@ -318,10 +620,15 @@ export default function InvoiceDetailPage() {
                   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
                 <p style={{ fontWeight: 700, marginBottom: "0.4rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>Investment confirmed!</p>
-                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem", fontFamily: "var(--font-body)" }}>
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "0.5rem", fontFamily: "var(--font-body)" }}>
                   Your position has been recorded on-chain.
                 </p>
-                <button className="btn btn-outline btn-sm" style={{ width: "100%" }} onClick={() => navigate("/dashboard/investor")}>
+                {fundingTx && (
+                  <a href={txUrl(fundingTx)} target="_blank" rel="noreferrer" style={{ fontSize: "0.8rem", color: "#15803D", fontFamily: "var(--font-body)" }}>
+                    View on BaseScan ↗
+                  </a>
+                )}
+                <button className="btn btn-outline btn-sm" style={{ width: "100%", marginTop: "1rem" }} onClick={() => navigate("/dashboard/investor")}>
                   View Portfolio
                 </button>
               </motion.div>
@@ -337,10 +644,73 @@ export default function InvoiceDetailPage() {
                 </div>
                 <div className="divider" />
                 <p style={{ fontWeight: 700, marginBottom: "0.6rem", fontSize: "0.9rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>Secondary Market</p>
-                {listForSale ? (
-                  <div style={{ padding: "0.75rem", background: "#DCFCE7", border: "1px solid rgba(21,128,61,0.2)", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "0.85rem", color: "#15803D", fontWeight: 700, fontFamily: "var(--font-body)" }}>Listed for sale</p>
-                    <p style={{ fontSize: "0.78rem", color: "#166534", fontFamily: "var(--font-body)" }}>Other investors can now purchase your position.</p>
+
+                {/* Already listed */}
+                {myListing ? (
+                  <div style={{ padding: "0.75rem", background: "#DCFCE7", border: "1px solid rgba(21,128,61,0.2)", borderRadius: "8px" }}>
+                    <p style={{ fontSize: "0.85rem", color: "#15803D", fontWeight: 700, fontFamily: "var(--font-body)", marginBottom: "0.4rem" }}>
+                      Listed for ${myListing.askingPrice.toLocaleString()}
+                    </p>
+                    <p style={{ fontSize: "0.78rem", color: "#166534", fontFamily: "var(--font-body)", marginBottom: "0.5rem" }}>
+                      {myListing.discount > 0 ? `${myListing.discount}% discount` : myListing.discount < 0 ? `${Math.abs(myListing.discount)}% premium` : "At par"} — other investors can now purchase your position.
+                    </p>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      style={{ width: "100%", color: "#B91C1C", borderColor: "#B91C1C" }}
+                      onClick={handleCancelListing}
+                    >
+                      Cancel Listing
+                    </button>
+                  </div>
+                ) : listForSale ? (
+                  /* Listing form */
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                    <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>
+                      Set your asking price for your ${myPosition.toLocaleString()} position.
+                    </p>
+                    <div style={{ position: "relative" }}>
+                      <span style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        placeholder={String(myPosition)}
+                        value={listingPrice}
+                        onChange={(e) => setListingPrice(e.target.value)}
+                        style={{
+                          width: "100%", padding: "0.65rem 0.75rem 0.65rem 1.5rem",
+                          borderRadius: "8px", border: "1px solid var(--border)",
+                          fontFamily: "var(--font-body)", fontSize: "0.9rem",
+                          background: "white",
+                        }}
+                      />
+                    </div>
+                    {listingPrice && parseFloat(listingPrice) > 0 && (
+                      <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>
+                        {parseFloat(listingPrice) < myPosition
+                          ? `${Math.round((1 - parseFloat(listingPrice) / myPosition) * 100)}% discount for buyers`
+                          : parseFloat(listingPrice) > myPosition
+                            ? `${Math.round((parseFloat(listingPrice) / myPosition - 1) * 100)}% premium`
+                            : "At par value"}
+                      </p>
+                    )}
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <button
+                        className="btn btn-outline btn-sm"
+                        style={{ flex: 1 }}
+                        onClick={() => { setListForSale(false); setListingPrice(""); }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btn-gold btn-sm"
+                        style={{ flex: 2 }}
+                        disabled={!listingPrice || parseFloat(listingPrice) <= 0 || !!listingLoading}
+                        onClick={handleListForSale}
+                      >
+                        {listingLoading || "List for Sale"}
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -352,6 +722,57 @@ export default function InvoiceDetailPage() {
                     </button>
                   </>
                 )}
+              </div>
+            )}
+
+            {/* Available listings from other investors */}
+            {otherListings.length > 0 && (
+              <div className="card">
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
+                  <span style={{ color: "#1D4ED8" }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+                    </svg>
+                  </span>
+                  <span style={{ fontWeight: 700, fontFamily: "var(--font-head)", color: "var(--text)", fontSize: "0.95rem" }}>
+                    Positions for Sale ({otherListings.length})
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {otherListings.map((l) => (
+                    <div key={l.id} style={{
+                      padding: "0.75rem",
+                      background: "var(--surface)",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
+                        <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontFamily: "monospace" }}>
+                          {l.sellerWallet.slice(0, 6)}…{l.sellerWallet.slice(-4)}
+                        </span>
+                        <span style={{ fontSize: "0.75rem", color: l.discount > 0 ? "#15803D" : "#B91C1C", fontWeight: 600, fontFamily: "var(--font-body)" }}>
+                          {l.discount > 0 ? `${l.discount}% off` : l.discount < 0 ? `${Math.abs(l.discount)}% premium` : "At par"}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <span style={{ fontSize: "0.82rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>Position: </span>
+                          <span style={{ fontWeight: 700, fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>${l.amount.toLocaleString()}</span>
+                          <span style={{ fontSize: "0.82rem", color: "var(--text-dim)", fontFamily: "var(--font-body)", marginLeft: "0.5rem" }}>Ask: </span>
+                          <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#15803D", fontFamily: "var(--font-body)" }}>${l.askingPrice.toLocaleString()}</span>
+                        </div>
+                        <button
+                          className="btn btn-gold btn-sm"
+                          style={{ padding: "0.35rem 1rem", fontSize: "0.8rem" }}
+                          disabled={!isConnected || buyingId === l.id}
+                          onClick={() => handleBuyListing(l)}
+                        >
+                          {buyingId === l.id ? "Buying…" : "Buy"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
