@@ -2,8 +2,8 @@ import { ethers } from "ethers";
 
 /* ── Deployed contract addresses (Base Sepolia) ── */
 export const ADDRESSES = {
-  InvoToken:   "0x415C4d4c2c46deB654da711ceAd483979EDF92D6",
-  FundingPool: "0x9e3921Eb1f67F5356e46fCbb39CEa576E8F5541a",
+  InvoToken:   "0xe8f6b202e7a37fce5b7bDCAa10EdE02C79842207",
+  FundingPool: "0xFA2F0cbCF71Af70c9E0a74DAE7e3Cf27B82c8b82",
 };
 
 /* ── Minimal ABIs for frontend interaction ── */

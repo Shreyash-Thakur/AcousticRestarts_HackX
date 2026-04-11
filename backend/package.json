@@ -8,13 +8,16 @@
     "compile": "npx hardhat compile",
     "test:contracts": "npx hardhat test",
     "deploy:base-sepolia": "npx hardhat run scripts/deploy.js --network base_sepolia",
-    "deploy:polygon-amoy": "npx hardhat run scripts/deploy.js --network polygon_amoy"
+    "deploy:polygon-amoy": "npx hardhat run scripts/deploy.js --network polygon_amoy",
+    "zk:build": "bash zk/scripts/buildCircuit.sh",
+    "chainlink:configure": "npx hardhat run scripts/configure-gst-verifier.js --network base_sepolia"
   },
   "dependencies": {
     "@biconomy/account": "^4.1.1",
     "@chainlink/contracts": "^1.2.0",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@openzeppelin/contracts": "^5.0.2",
+    "circomlibjs": "^0.1.7",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "ethers": "^6.15.0",
@@ -23,6 +26,7 @@
     "snarkjs": "^0.7.4"
   },
   "devDependencies": {
+    "circomlib": "^2.0.5",
     "hardhat": "^2.22.3"
   }
 }

@@ -5,6 +5,8 @@ import invoiceRoutes from "./routes/invoice.routes.js";
 import listingRoutes from "./routes/listing.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
+import riskRoutes from "./routes/risk.routes.js";
+import gstRoutes from "./routes/gst.routes.js";
 
 const app = express();
 app.use(cors());
@@ -20,6 +22,10 @@ app.use("/api", invoiceRoutes);
 app.use("/", listingRoutes);
 app.use("/api", listingRoutes);
 app.use("/api", paymentRoutes);
+app.use("/", riskRoutes);
+app.use("/api", riskRoutes);
+app.use("/", gstRoutes);
+app.use("/api", gstRoutes);
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
