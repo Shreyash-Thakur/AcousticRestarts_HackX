@@ -2,6 +2,8 @@ import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { invoices } from "../data/mockData";
 import InvoiceCard from "../components/InvoiceCard";
+import PageBackground from "../components/PageBackground";
+import RevealOnScroll from "../components/RevealOnScroll";
 
 /* ── Icons ── */
 const FilterIcon = () => (
@@ -68,16 +70,18 @@ export default function MarketplacePage() {
   ].filter(Boolean);
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
 
         {/* Header */}
         <div style={{ marginBottom: "2rem" }}>
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
             <div>
-              <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
-                Invoice Marketplace
-              </h1>
+              <RevealOnScroll>
+                <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
+                  Invoice Marketplace
+                </h1>
+              </RevealOnScroll>
               <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>
                 {filtered.length} invoice{filtered.length !== 1 ? "s" : ""} available
               </p>
@@ -228,6 +232,6 @@ export default function MarketplacePage() {
           </div>
         )}
       </div>
-    </div>
+    </PageBackground>
   );
 }

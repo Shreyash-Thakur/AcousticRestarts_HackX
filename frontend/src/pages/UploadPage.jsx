@@ -2,6 +2,8 @@ import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
+import PageBackground from "../components/PageBackground";
+import RevealOnScroll from "../components/RevealOnScroll";
 
 /* ── Icons ── */
 const UploadCloudIcon = () => (
@@ -85,13 +87,15 @@ export default function UploadPage() {
   const handleDraftToken = () => setStep("confirmed");
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
         {/* Header */}
         <div style={{ marginBottom: "2.25rem" }}>
-          <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.5rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
-            Upload &amp; Tokenize Invoice
-          </h1>
+          <RevealOnScroll>
+            <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.5rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
+              Upload &amp; Tokenize Invoice
+            </h1>
+          </RevealOnScroll>
           <p style={{ color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>
             Upload your invoice — we'll parse the details, score the risk, and create an on-chain token.
           </p>
@@ -369,6 +373,6 @@ export default function UploadPage() {
 
         </AnimatePresence>
       </div>
-    </div>
+    </PageBackground>
   );
 }

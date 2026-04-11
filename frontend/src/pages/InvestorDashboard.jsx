@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { investorPortfolio } from "../data/mockData";
 import { TrustScoreRing } from "../components/TrustScoreRing";
+import PageBackground from "../components/PageBackground";
+import RevealOnScroll from "../components/RevealOnScroll";
 
 /* ── Icons ── */
 const TrendUpIcon = () => (
@@ -132,15 +134,17 @@ export default function InvestorDashboard() {
   const handleList = (id) => setListed((prev) => ({ ...prev, [id]: !prev[id] }));
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: "2.5rem", flexWrap: "wrap", gap: "1rem" }}>
           <div>
-            <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
-              Investor Portfolio
-            </h1>
+            <RevealOnScroll>
+              <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
+                Investor Portfolio
+              </h1>
+            </RevealOnScroll>
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>
               Track your active positions and manage returns
             </p>
@@ -180,9 +184,11 @@ export default function InvestorDashboard() {
 
           {/* ── Positions ── */}
           <div>
-            <h2 style={{ fontSize: "1.15rem", fontWeight: 700, marginBottom: "1.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
-              Active Positions
-            </h2>
+            <RevealOnScroll>
+              <h2 style={{ fontSize: "1.15rem", fontWeight: 700, marginBottom: "1.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
+                Active Positions
+              </h2>
+            </RevealOnScroll>
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               {investorPortfolio.map((pos, i) => (
                 <motion.div
@@ -335,6 +341,6 @@ export default function InvestorDashboard() {
           </div>
         </div>
       </div>
-    </div>
+    </PageBackground>
   );
 }

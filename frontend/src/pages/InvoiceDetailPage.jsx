@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { invoices } from "../data/mockData";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
+import PageBackground from "../components/PageBackground";
+import RevealOnScroll from "../components/RevealOnScroll";
 
 /* ── Icons ── */
 const ArrowLeftIcon = () => (
@@ -75,7 +77,7 @@ export default function InvoiceDetailPage() {
   };
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2rem", paddingBottom: "4rem" }}>
 
         {/* Back */}
@@ -97,7 +99,7 @@ export default function InvoiceDetailPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem" }}>
                 <div>
                   <p style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginBottom: "0.3rem", fontFamily: "var(--font-body)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Business</p>
-                  <h1 style={{ fontSize: "1.7rem", fontWeight: 800, marginBottom: "0.2rem", fontFamily: "var(--font-head)", letterSpacing: "-0.02em" }}>{business}</h1>
+                  <RevealOnScroll><h1 style={{ fontSize: "1.7rem", fontWeight: 800, marginBottom: "0.2rem", fontFamily: "var(--font-head)", letterSpacing: "-0.02em" }}>{business}</h1></RevealOnScroll>
                   <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>Client: {clientName}</p>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.4rem" }}>
@@ -374,6 +376,6 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       </div>
-    </div>
+    </PageBackground>
   );
 }

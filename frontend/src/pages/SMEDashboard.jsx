@@ -1,6 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { smeInvoices } from "../data/mockData";
+import PageBackground from "../components/PageBackground";
+import RevealOnScroll from "../components/RevealOnScroll";
 
 /* ── Icons ── */
 const PlusIcon = () => (
@@ -56,15 +58,17 @@ export default function SMEDashboard() {
   const navigate = useNavigate();
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: "2.5rem", flexWrap: "wrap", gap: "1rem" }}>
           <div>
-            <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
-              SME Dashboard
-            </h1>
+            <RevealOnScroll>
+              <h1 style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "0.25rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
+                SME Dashboard
+              </h1>
+            </RevealOnScroll>
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>
               Manage your invoices and track liquidity
             </p>
@@ -108,7 +112,7 @@ export default function SMEDashboard() {
 
         {/* Invoice table */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.1rem" }}>
-          <h2 style={{ fontSize: "1.15rem", fontWeight: 700, fontFamily: "var(--font-head)", color: "var(--text)" }}>Your Invoices</h2>
+          <RevealOnScroll><h2 style={{ fontSize: "1.15rem", fontWeight: 700, fontFamily: "var(--font-head)", color: "var(--text)" }}>Your Invoices</h2></RevealOnScroll>
           <span style={{ fontSize: "0.82rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>{smeInvoices.length} invoices</span>
         </div>
 
@@ -175,6 +179,6 @@ export default function SMEDashboard() {
         </div>
 
       </div>
-    </div>
+    </PageBackground>
   );
 }
