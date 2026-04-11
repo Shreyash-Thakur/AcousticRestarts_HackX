@@ -5,6 +5,7 @@ import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
 import { createInvoice } from "../lib/api";
 import { useWeb3 } from "../context/Web3Context";
 import { txUrl } from "../lib/contracts";
+import PageBackground from "../components/PageBackground";
 
 /* ── Icons ── */
 const UploadCloudIcon = () => (
@@ -121,7 +122,7 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
         {/* Header */}
         <div style={{ marginBottom: "2.25rem" }}>
@@ -427,6 +428,6 @@ export default function UploadPage() {
 
         </AnimatePresence>
       </div>
-    </div>
+    </PageBackground>
   );
 }

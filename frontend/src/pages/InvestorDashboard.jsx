@@ -5,6 +5,7 @@ import { investorPortfolio as mockPortfolio } from "../data/mockData";
 import { TrustScoreRing } from "../components/TrustScoreRing";
 import { useWeb3 } from "../context/Web3Context";
 import { getInvoTokenRead, getFundingPoolRead, formatTokenValue, txUrl, tokenUrl } from "../lib/contracts";
+import PageBackground from "../components/PageBackground";
 
 /* ── Icons ── */
 const TrendUpIcon = () => (
@@ -149,7 +150,7 @@ export default function InvestorDashboard() {
   const riskColor = { Low: "#15803D", Medium: "#B45309", High: "#B91C1C" };
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
 
         {/* Header */}
@@ -365,6 +366,6 @@ export default function InvestorDashboard() {
           </div>
         </div>
       </div>
-    </div>
+    </PageBackground>
   );
 }

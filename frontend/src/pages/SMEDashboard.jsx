@@ -5,6 +5,7 @@ import { smeInvoices as fallbackInvoices } from "../data/mockData";
 import { fetchInvoices } from "../lib/api";
 import { useWeb3 } from "../context/Web3Context";
 import { txUrl, tokenUrl } from "../lib/contracts";
+import PageBackground from "../components/PageBackground";
 
 /* ── Icons ── */
 const PlusIcon = () => (
@@ -110,7 +111,7 @@ export default function SMEDashboard() {
   }, [smeInvoices, liveInvoices]);
 
   return (
-    <div className="page" style={{ background: "var(--bg)" }}>
+    <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2.5rem", paddingBottom: "4rem" }}>
 
         {/* Header */}
@@ -245,6 +246,6 @@ export default function SMEDashboard() {
         </div>
 
       </div>
-    </div>
+    </PageBackground>
   );
 }
