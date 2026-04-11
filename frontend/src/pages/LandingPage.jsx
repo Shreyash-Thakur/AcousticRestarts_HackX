@@ -356,7 +356,7 @@ export default function LandingPage() {
             </motion.div>
 
             <motion.div variants={fadeUp} style={{ marginTop: "2rem", display: "flex", gap: "1.75rem", justifyContent: "center", flexWrap: "wrap" }}>
-              {["Non-custodial", "Audited smart contracts", "0% platform fee for SMEs"].map((t) => (
+              {["Non-custodial", "Audited smart contracts", "0% Gas fee for SMEs"].map((t) => (
                 <span key={t} style={{
                   display: "flex", alignItems: "center", gap: "0.4rem",
                   fontSize: "0.83rem",

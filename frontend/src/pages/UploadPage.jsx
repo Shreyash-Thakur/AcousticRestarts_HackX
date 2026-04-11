@@ -192,7 +192,7 @@ export default function UploadPage() {
                   className="btn btn-outline btn-sm"
                   onClick={() => handleFile({ name: "invoice_sample.pdf" })}
                 >
-                  Use sample invoice
+                  Add invoice
                 </button>
               </div>
             </motion.div>
