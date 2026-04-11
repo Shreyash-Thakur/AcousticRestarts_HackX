@@ -1,14 +1,16 @@
 import { Router } from "express";
 import {
-  uploadInvoice,
-  getInvoice,
+  createInvoice,
   listInvoices,
 } from "../controllers/invoice.controller.js";
 
 const router = Router();
 
-router.post("/", uploadInvoice);
-router.get("/:id", getInvoice);
-router.get("/", listInvoices);
+router.post("/invoice", createInvoice);
+router.get("/invoices", listInvoices);
+
+// Backward-compatible aliases for existing frontend integration.
+router.post("/invoices", createInvoice);
+router.get("/invoice", listInvoices);
 
 export default router;
