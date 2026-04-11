@@ -1,0 +1,54 @@
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ─── Build outputs ────────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.next/
+.nuxt/
+coverage/
+
+# ─── Hardhat / Foundry ────────────────────────────────────────────────────────
+cache/
+artifacts/
+typechain-types/
+deployments/localhost/
+deployments/hardhat/
+
+# ─── ZK / Circom ──────────────────────────────────────────────────────────────
+backend/zk/build/
+backend/zk/proofs/*.json
+backend/zk/keys/
+
+# ─── Environment variables ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+backend/.env
+client/.env
+client/.env.local
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── OS & Editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+tmp/
+*.tmp
+*.swp

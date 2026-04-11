@@ -1,0 +1,25 @@
+{
+  "name": "invoflow-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "compile": "npx hardhat compile",
+    "test:contracts": "npx hardhat test",
+    "deploy:base-sepolia": "npx hardhat run scripts/deploy.js --network base_sepolia",
+    "deploy:polygon-amoy": "npx hardhat run scripts/deploy.js --network polygon_amoy"
+  },
+  "dependencies": {
+    "@biconomy/account": "^4.1.1",
+    "@chainlink/contracts": "^1.2.0",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "snarkjs": "^0.7.4"
+  },
+  "devDependencies": {
+    "hardhat": "^2.22.3"
+  }
+}
