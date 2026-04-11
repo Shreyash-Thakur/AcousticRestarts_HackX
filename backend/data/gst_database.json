@@ -1,7 +1,7 @@
 [
-  { "companyName": "Aarya Tech Solutions Pvt Ltd", "gst": "14BTBIW1440B2Z1" },
-  { "companyName": "NexGen Analytics LLP",         "gst": "31IJHXZ7367O1ZW" },
-  { "companyName": "BluePeak Consulting",           "gst": "19SOGIC3453A3ZJ" },
-  { "companyName": "Shivam Enterprises",            "gst": "15YULJZ3576Y2ZD" },
-  { "companyName": "Zenith Digital Services",       "gst": "17NENAA8524E4ZD" }
+  { "companyName": "Reliance Retail Ltd",        "gst": "14BTBIW1440B2Z1" },
+  { "companyName": "Tata Consultancy Services",  "gst": "31IJHXZ7367O1ZW" },
+  { "companyName": "Infosys Limited",            "gst": "19SOGIC3453A3ZJ" },
+  { "companyName": "Aditya Birla Finance",       "gst": "15YULJZ3576Y2ZD" },
+  { "companyName": "Mahindra Logistics",         "gst": "17NENAA8524E4ZD" }
 ]
