@@ -16,7 +16,18 @@ const isValidDate = (value) => !Number.isNaN(Date.parse(value));
 
 export const createInvoice = async (req, res) => {
   try {
-    const { businessName, clientName, amount, dueDate, smeWallet } = req.body;
+    const {
+      businessName,
+      clientName,
+      amount,
+      dueDate,
+      smeWallet,
+      // Optional enriched fields from invoice parser
+      invoiceNumber,
+      invoiceDate,
+      clientGST,
+      smeName,
+    } = req.body;
 
     if (!businessName || !clientName || !amount || !dueDate) {
       return res.status(400).json({
@@ -41,6 +52,10 @@ export const createInvoice = async (req, res) => {
       amount: parsedAmount,
       dueDate,
       smeWallet: smeWallet || null,
+      invoiceNumber: invoiceNumber || null,
+      invoiceDate: invoiceDate || null,
+      clientGST: clientGST || null,
+      smeName: smeName || null,
       createdAt: new Date().toISOString(),
     });
 

@@ -1,10 +1,47 @@
 const API_BASE = "/api";
 
-export async function createInvoice({ businessName, clientName, amount, dueDate, smeWallet }) {
+/**
+ * Upload a PDF or image file to the backend and receive extracted invoice fields
+ * with per-field confidence scores.
+ * @param {File} file
+ * @returns {Promise<{ fields: Record<string, { value: string, confidence: number }> }>}
+ */
+export async function parseInvoiceFile(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/invoice/parse`, { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Parse request failed" }));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function createInvoice({
+  businessName,
+  clientName,
+  amount,
+  dueDate,
+  smeWallet,
+  invoiceNumber,
+  invoiceDate,
+  clientGST,
+  smeName,
+}) {
   const res = await fetch(`${API_BASE}/invoice`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ businessName, clientName, amount: Number(amount), dueDate, smeWallet }),
+    body: JSON.stringify({
+      businessName,
+      clientName,
+      amount: Number(amount),
+      dueDate,
+      smeWallet,
+      invoiceNumber,
+      invoiceDate,
+      clientGST,
+      smeName,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: "Request failed" }));
