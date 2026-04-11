@@ -1,6 +1,8 @@
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { platformStats } from "../data/mockData";
+import { platformStats as fallbackStats } from "../data/mockData";
+import { fetchStats } from "../lib/api";
 import Footer from "../components/Footer";
 
 /* ── Icons ── */
@@ -90,15 +92,24 @@ const features = [
   { icon: <TrendingIcon />,title:"Yield Optimization",      desc: "Filter by yield, risk, and maturity to build your ideal portfolio.",        color: "#B45309", bg: "#FEF3C7" },
 ];
 
-const statItems = [
-  { label: "Total Funded",     value: platformStats.totalFunded,     note: "Across all invoices" },
-  { label: "Active Invoices",  value: platformStats.activeInvoices,  note: "Currently raising" },
-  { label: "Average Yield",    value: platformStats.avgYield,        note: "Annualized return" },
-  { label: "Avg. Trust Score", value: platformStats.avgTrustScore,   note: "Out of 100" },
-];
-
 export default function LandingPage() {
   const navigate = useNavigate();
+  const [stats, setStats] = useState(fallbackStats);
+
+  useEffect(() => {
+    fetchStats()
+      .then((data) => {
+        if (data && data.totalFunded) setStats(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  const statItems = [
+    { label: "Total Funded",     value: stats.totalFunded,     note: "Across all invoices" },
+    { label: "Active Invoices",  value: stats.activeInvoices,  note: "Currently raising" },
+    { label: "Average Yield",    value: stats.avgYield,        note: "Annualized return" },
+    { label: "Avg. Trust Score", value: stats.avgTrustScore,   note: "Out of 100" },
+  ];
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>

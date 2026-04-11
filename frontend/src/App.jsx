@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Web3Provider } from "./context/Web3Context";
 import Navbar from "./components/Navbar";
 import LandingPage from "./pages/LandingPage";
 import UploadPage from "./pages/UploadPage";
@@ -10,15 +11,17 @@ import InvestorDashboard from "./pages/InvestorDashboard";
 export default function App() {
   return (
     <BrowserRouter>
-      <Navbar />
-      <Routes>
-        <Route path="/"                   element={<LandingPage />} />
-        <Route path="/upload"             element={<UploadPage />} />
-        <Route path="/marketplace"        element={<MarketplacePage />} />
-        <Route path="/invoice/:id"        element={<InvoiceDetailPage />} />
-        <Route path="/dashboard/sme"      element={<SMEDashboard />} />
-        <Route path="/dashboard/investor" element={<InvestorDashboard />} />
-      </Routes>
+      <Web3Provider>
+        <Navbar />
+        <Routes>
+          <Route path="/"                   element={<LandingPage />} />
+          <Route path="/upload"             element={<UploadPage />} />
+          <Route path="/marketplace"        element={<MarketplacePage />} />
+          <Route path="/invoice/:id"        element={<InvoiceDetailPage />} />
+          <Route path="/dashboard/sme"      element={<SMEDashboard />} />
+          <Route path="/dashboard/investor" element={<InvestorDashboard />} />
+        </Routes>
+      </Web3Provider>
     </BrowserRouter>
   );
 }

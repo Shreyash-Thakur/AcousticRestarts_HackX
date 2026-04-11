@@ -18,3 +18,10 @@ export const getInvoiceById = (invoiceId) => {
 
   return invoices.find((invoice) => invoice.id === parsedId) || null;
 };
+
+export const updateInvoice = (invoiceId, updates) => {
+  const parsedId = Number(invoiceId);
+  const inv = invoices.find((invoice) => invoice.id === parsedId);
+  if (inv) Object.assign(inv, updates);
+  return inv || null;
+};

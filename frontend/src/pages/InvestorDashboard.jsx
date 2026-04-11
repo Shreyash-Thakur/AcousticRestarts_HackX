@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { investorPortfolio } from "../data/mockData";
+import { investorPortfolio as mockPortfolio } from "../data/mockData";
 import { TrustScoreRing } from "../components/TrustScoreRing";
+import { useWeb3 } from "../context/Web3Context";
+import { getInvoTokenRead, getFundingPoolRead, formatTokenValue, txUrl, tokenUrl } from "../lib/contracts";
 
 /* ── Icons ── */
 const TrendUpIcon = () => (
@@ -44,92 +46,107 @@ const SearchIcon = () => (
   </svg>
 );
 
-const totalInvested = investorPortfolio.reduce((s, p) => s + p.investedAmount, 0);
-const totalExpected = investorPortfolio.reduce((s, p) => s + p.investedAmount + p.expectedReturn, 0);
-const avgYield = (investorPortfolio.reduce((s, p) => s + p.yield, 0) / investorPortfolio.length).toFixed(1);
-
-const metrics = [
-  { label: "Total Invested",   value: `$${totalInvested.toLocaleString()}`, icon: <WalletIcon />,  color: "#15803D", bg: "#DCFCE7", desc: "Across all positions" },
-  { label: "Portfolio Value",  value: `$${totalExpected.toLocaleString()}`, icon: <TrendUpIcon />, color: "#1D4ED8", bg: "#DBEAFE", desc: "Including expected returns" },
-  { label: "Average Yield",   value: `${avgYield}%`,                        icon: <PercentIcon />, color: "#B45309", bg: "#FEF3C7", desc: "Annualized" },
-  { label: "Active Positions", value: String(investorPortfolio.length),      icon: <LayersIcon />,  color: "#0D9488", bg: "#CCFBF1", desc: "Funded invoices" },
-];
-
-const riskColor = { Low: "#15803D", Medium: "#B45309", High: "#B91C1C" };
-
 /* ── Custom SVG scatter chart ── */
+const RISK_COLOR = { Low: "#15803D", Medium: "#B45309", High: "#B91C1C" };
 function YieldRiskChart({ positions }) {
   const W = 400, H = 220;
   const pad = { top: 20, right: 24, bottom: 40, left: 48 };
   const cW = W - pad.left - pad.right;
   const cH = H - pad.top - pad.bottom;
-
   const maxY = 20;
   const cx = (pos) => pad.left + ((100 - pos.trustScore) / 100) * cW;
   const cy = (pos) => pad.top + cH - (pos.yield / maxY) * cH;
   const r  = (pos) => Math.max(8, Math.min(20, Math.sqrt(pos.investedAmount / 220)));
-
   const xTicks = [0, 25, 50, 75, 100];
   const yTicks = [0, 5, 10, 15, 20];
-
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto" }}>
-      {/* Grid */}
-      {yTicks.map((t) => {
-        const y = pad.top + cH - (t / maxY) * cH;
-        return (
-          <g key={t}>
-            <line x1={pad.left} y1={y} x2={W - pad.right} y2={y} stroke="rgba(28,25,23,0.07)" strokeWidth={1}/>
-            <text x={pad.left - 8} y={y + 4} textAnchor="end" fill="#A8A29E" fontSize={9}>{t}%</text>
-          </g>
-        );
-      })}
-      {xTicks.map((t) => {
-        const x = pad.left + (t / 100) * cW;
-        return (
-          <g key={t}>
-            <line x1={x} y1={pad.top} x2={x} y2={pad.top + cH} stroke="rgba(28,25,23,0.06)" strokeWidth={1}/>
-            <text x={x} y={H - 8} textAnchor="middle" fill="#A8A29E" fontSize={9}>{t}</text>
-          </g>
-        );
-      })}
-
-      {/* Axis labels */}
+      {yTicks.map((t) => { const y = pad.top + cH - (t / maxY) * cH; return (<g key={t}><line x1={pad.left} y1={y} x2={W - pad.right} y2={y} stroke="rgba(28,25,23,0.07)" strokeWidth={1}/><text x={pad.left - 8} y={y + 4} textAnchor="end" fill="#A8A29E" fontSize={9}>{t}%</text></g>); })}
+      {xTicks.map((t) => { const x = pad.left + (t / 100) * cW; return (<g key={t}><line x1={x} y1={pad.top} x2={x} y2={pad.top + cH} stroke="rgba(28,25,23,0.06)" strokeWidth={1}/><text x={x} y={H - 8} textAnchor="middle" fill="#A8A29E" fontSize={9}>{t}</text></g>); })}
       <text x={W / 2} y={H - 1} textAnchor="middle" fill="#78716C" fontSize={10}>Risk Score →</text>
       <text x={8} y={H / 2} textAnchor="middle" fill="#78716C" fontSize={10} transform={`rotate(-90, 8, ${H / 2})`}>Yield →</text>
-
-      {/* Quadrant shading */}
       <rect x={pad.left} y={pad.top} width={cW / 2} height={cH / 2} fill="rgba(21,128,61,0.04)" rx={2}/>
       <rect x={pad.left + cW / 2} y={pad.top + cH / 2} width={cW / 2} height={cH / 2} fill="rgba(185,28,28,0.03)" rx={2}/>
-
-      {/* Data points */}
-      {positions.map((pos) => {
-        const x = cx(pos), y = cy(pos), radius = r(pos);
-        const color = riskColor[pos.riskLevel];
-        return (
-          <g key={pos.id}>
-            <circle cx={x} cy={y} r={radius + 5} fill={`${color}10`}/>
-            <circle cx={x} cy={y} r={radius} fill={`${color}CC`} stroke={color} strokeWidth={1.5}/>
-            <title>{pos.business} · {pos.yield}% yield · ${pos.investedAmount.toLocaleString()}</title>
-          </g>
-        );
-      })}
-
-      {/* Legend */}
-      {[["Low", "#15803D"], ["Medium", "#B45309"], ["High", "#B91C1C"]].map(([label, color], i) => (
-        <g key={label} transform={`translate(${W - 92}, ${pad.top + i * 17})`}>
-          <circle cx={6} cy={6} r={5} fill={`${color}CC`} stroke={color} strokeWidth={1}/>
-          <text x={14} y={10} fill="#78716C" fontSize={9.5}>{label} Risk</text>
-        </g>
-      ))}
+      {positions.map((pos) => { const x = cx(pos), y = cy(pos), radius = r(pos), color = RISK_COLOR[pos.riskLevel] || "#78716C"; return (<g key={pos.id}><circle cx={x} cy={y} r={radius + 5} fill={`${color}10`}/><circle cx={x} cy={y} r={radius} fill={`${color}CC`} stroke={color} strokeWidth={1.5}/><title>{pos.business} · {pos.yield}% yield · ${pos.investedAmount.toLocaleString()}</title></g>); })}
+      {[["Low", "#15803D"], ["Medium", "#B45309"], ["High", "#B91C1C"]].map(([label, color], i) => (<g key={label} transform={`translate(${W - 92}, ${pad.top + i * 17})`}><circle cx={6} cy={6} r={5} fill={`${color}CC`} stroke={color} strokeWidth={1}/><text x={14} y={10} fill="#78716C" fontSize={9.5}>{label} Risk</text></g>))}
     </svg>
   );
 }
 
 export default function InvestorDashboard() {
   const navigate = useNavigate();
+  const { account, isConnected } = useWeb3();
   const [listed, setListed] = useState({});
+  const [positions, setPositions] = useState([]);
+  const [loadingChain, setLoadingChain] = useState(false);
   const handleList = (id) => setListed((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  // Read on-chain positions for connected wallet
+  useEffect(() => {
+    if (!isConnected || !account) {
+      setPositions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoadingChain(true);
+      try {
+        const invoToken = getInvoTokenRead();
+        const fundingPool = getFundingPoolRead();
+        const total = Number(await invoToken.totalSupply());
+        const found = [];
+        for (let tokenId = 1; tokenId <= total; tokenId++) {
+          try {
+            const invested = await fundingPool.getInvestment(account, tokenId);
+            const investedNum = formatTokenValue(invested);
+            if (investedNum > 0) {
+              const info = await fundingPool.getFundingInfo(tokenId);
+              const inv = await invoToken.getInvoice(tokenId);
+              const dueDateUnix = Number(inv[3]) || 0;
+              const daysToMaturity = Math.max(0, Math.ceil((dueDateUnix * 1000 - Date.now()) / 86400000));
+              const yld = 10; // default yield for chain data
+              found.push({
+                id: `chain-${tokenId}`,
+                tokenId,
+                business: `Invoice #${tokenId}`,
+                invoiceNumber: `INV-${String(tokenId).padStart(3, "0")}`,
+                investedAmount: investedNum,
+                expectedReturn: investedNum * (yld / 100) * (daysToMaturity / 365),
+                yield: yld,
+                trustScore: 75,
+                riskLevel: "Medium",
+                daysToMaturity,
+                status: info[3] ? "settled" : "funding",
+                _source: "chain",
+              });
+            }
+          } catch { /* skip tokens we can't read */ }
+        }
+        if (!cancelled) setPositions(found);
+      } catch (err) {
+        console.warn("Failed to load on-chain positions:", err);
+      } finally {
+        if (!cancelled) setLoadingChain(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [account, isConnected]);
+
+  // Use on-chain positions if available, else mock data
+  const investorPortfolio = positions.length > 0 ? [...positions, ...mockPortfolio] : mockPortfolio;
+
+  const totalInvested = investorPortfolio.reduce((s, p) => s + p.investedAmount, 0);
+  const totalExpected = investorPortfolio.reduce((s, p) => s + p.investedAmount + p.expectedReturn, 0);
+  const avgYield = (investorPortfolio.reduce((s, p) => s + p.yield, 0) / investorPortfolio.length).toFixed(1);
+
+  const metrics = [
+    { label: "Total Invested",   value: `$${totalInvested.toLocaleString()}`, icon: <WalletIcon />,  color: "#15803D", bg: "#DCFCE7", desc: isConnected ? "Includes on-chain" : "Demo data" },
+    { label: "Portfolio Value",  value: `$${Math.round(totalExpected).toLocaleString()}`, icon: <TrendUpIcon />, color: "#1D4ED8", bg: "#DBEAFE", desc: "Including expected returns" },
+    { label: "Average Yield",   value: `${avgYield}%`,                        icon: <PercentIcon />, color: "#B45309", bg: "#FEF3C7", desc: "Annualized" },
+    { label: "Active Positions", value: String(investorPortfolio.length),      icon: <LayersIcon />,  color: "#0D9488", bg: "#CCFBF1", desc: `${positions.length} on-chain` },
+  ];
+
+  const riskColor = { Low: "#15803D", Medium: "#B45309", High: "#B91C1C" };
 
   return (
     <div className="page" style={{ background: "var(--bg)" }}>
@@ -142,7 +159,7 @@ export default function InvestorDashboard() {
               Investor Portfolio
             </h1>
             <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>
-              Track your active positions and manage returns
+              {isConnected ? `Connected: ${account.slice(0, 6)}…${account.slice(-4)}` : "Connect wallet to see on-chain positions"}
             </p>
           </div>
           <button
@@ -153,6 +170,12 @@ export default function InvestorDashboard() {
             <SearchIcon /> Browse Marketplace
           </button>
         </div>
+
+        {loadingChain && (
+          <p style={{ textAlign: "center", color: "var(--text-muted)", marginBottom: "1.5rem", fontFamily: "var(--font-body)" }}>
+            Loading on-chain positions…
+          </p>
+        )}
 
         {/* Metrics */}
         <div className="grid-4" style={{ marginBottom: "2.5rem" }}>
@@ -206,7 +229,14 @@ export default function InvestorDashboard() {
                       <p style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)", fontFamily: "var(--font-head)", marginBottom: "0.15rem" }}>
                         {pos.business}
                       </p>
-                      <p style={{ fontSize: "0.76rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>{pos.invoiceNumber}</p>
+                      <p style={{ fontSize: "0.76rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>
+                        {pos.invoiceNumber}
+                        {pos.tokenId && (
+                          <a href={tokenUrl(pos.tokenId)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ marginLeft: "0.4rem", color: "#15803D", fontSize: "0.72rem" }}>
+                            Token #{pos.tokenId} ↗
+                          </a>
+                        )}
+                      </p>
                     </div>
 
                     {/* Stats */}

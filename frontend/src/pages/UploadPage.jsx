@@ -2,6 +2,9 @@ import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
+import { createInvoice } from "../lib/api";
+import { useWeb3 } from "../context/Web3Context";
+import { txUrl } from "../lib/contracts";
 
 /* ── Icons ── */
 const UploadCloudIcon = () => (
@@ -62,8 +65,13 @@ export default function UploadPage() {
   const [filename, setFilename] = useState("");
   const [fields, setFields] = useState(mockParsed);
   const [progress, setProgress] = useState(0);
+  const [created, setCreated] = useState(null);
+  const [riskData, setRiskData] = useState(mockRisk);
+  const [submitError, setSubmitError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef(null);
   const navigate = useNavigate();
+  const { account, isConnected } = useWeb3();
 
   const handleFile = (file) => {
     if (!file) return;
@@ -82,7 +90,35 @@ export default function UploadPage() {
     }, 200);
   };
 
-  const handleDraftToken = () => setStep("confirmed");
+  const handleDraftToken = async () => {
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const res = await createInvoice({
+        businessName: fields.clientName,
+        clientName: fields.clientName,
+        amount: parseFloat(String(fields.amount).replace(/,/g, "")),
+        dueDate: fields.dueDate,
+        smeWallet: isConnected ? account : undefined,
+      });
+      setCreated(res);
+      if (res.riskScore != null) {
+        setRiskData({
+          overall: res.riskScore,
+          subScores: {
+            "Payment Reliability": res.reliability?.paymentReliability ?? 80,
+            "Invoice Legitimacy": Math.min(100, res.riskScore + 3),
+            "Business Profile": Math.max(0, res.riskScore - 5),
+          },
+        });
+      }
+      setStep("confirmed");
+    } catch (err) {
+      setSubmitError(err.message || "Failed to create invoice");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="page" style={{ background: "var(--bg)" }}>
@@ -256,9 +292,15 @@ export default function UploadPage() {
                     className="btn btn-gold"
                     style={{ width: "100%", justifyContent: "center", gap: "0.5rem" }}
                     onClick={handleDraftToken}
+                    disabled={submitting}
                   >
-                    <CubeIcon /> Draft Token on Chain
+                    {submitting ? <><SpinnerIcon /> Submitting…</> : <><CubeIcon /> Draft Token on Chain</>}
                   </button>
+                  {submitError && (
+                    <p style={{ color: "#B91C1C", fontSize: "0.85rem", marginTop: "0.75rem", fontFamily: "var(--font-body)" }}>
+                      {submitError}
+                    </p>
+                  )}
                 </div>
 
                 {/* Risk panel */}
@@ -274,7 +316,7 @@ export default function UploadPage() {
 
                   <div style={{ display: "flex", justifyContent: "center", marginBottom: "1.5rem" }}>
                     <div style={{ textAlign: "center" }}>
-                      <TrustScoreRing score={mockRisk.overall} size={130} />
+                      <TrustScoreRing score={riskData.overall} size={130} />
                       <p style={{ marginTop: "0.75rem", fontSize: "0.8rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>
                         Overall Trust Score
                       </p>
@@ -282,7 +324,7 @@ export default function UploadPage() {
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                    {Object.entries(mockRisk.subScores).map(([label, val]) => (
+                    {Object.entries(riskData.subScores).map(([label, val]) => (
                       <SubScoreBar key={label} label={label} value={val} />
                     ))}
                   </div>
@@ -332,7 +374,9 @@ export default function UploadPage() {
                 Token Drafted Successfully
               </h2>
               <p style={{ color: "var(--text-muted)", marginBottom: "0.5rem", fontFamily: "var(--font-body)" }}>
-                Your invoice has been tokenized on-chain and is now live on the marketplace.
+                {created?.onChainMinted
+                  ? "Your invoice has been tokenized on-chain and is now live on the marketplace."
+                  : "Your invoice has been created and is now live on the marketplace."}
               </p>
 
               <div style={{
@@ -344,16 +388,30 @@ export default function UploadPage() {
                 display: "flex", flexDirection: "column", gap: "0.65rem",
               }}>
                 {[
-                  ["Invoice", "TCE-2026-0042"],
-                  ["Token ID", "#4291"],
-                  ["Network", "Ethereum Mainnet"],
-                  ["Status", "Live on Marketplace"],
-                ].map(([k, v]) => (
+                  ["Invoice", created?.businessName || "—"],
+                  ["Invoice ID", `#${created?.id ?? "—"}`],
+                  created?.tokenId && ["Token ID (On-Chain)", `#${created.tokenId}`],
+                  ["Risk Score", `${created?.riskScore ?? "—"} (${created?.riskLevel ?? ""})`],
+                  ["Status", created?.onChainMinted ? "Minted on Base Sepolia" : "Live on Marketplace"],
+                ].filter(Boolean).map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
                     <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>{k}</span>
                     <span style={{ color: "var(--text)", fontWeight: 600, fontFamily: "var(--font-body)" }}>{v}</span>
                   </div>
                 ))}
+                {created?.mintTxHash && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>
+                    <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>Transaction</span>
+                    <a
+                      href={txUrl(created.mintTxHash)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "#15803D", fontWeight: 600, fontSize: "0.85rem", fontFamily: "var(--font-body)" }}
+                    >
+                      View on BaseScan ↗
+                    </a>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
