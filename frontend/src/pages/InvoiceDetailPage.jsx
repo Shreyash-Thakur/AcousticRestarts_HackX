@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { fetchInvoices, createListing, fetchListingConfig, fetchListings, buyListingApi, cancelListingApi, createPaymentOrder, verifyPayment, openRazorpayCheckout, openFundingForToken as openFundingForTokenApi, fundInvoiceDirect as fundInvoiceDirectApi, fetchInvoiceChainState, syncInvestorPosition as syncInvestorPositionApi } from "../lib/api";
+import { fetchInvoices, createListing, fetchListingConfig, fetchListings, buyListingApi, cancelListingApi, createPaymentOrder, verifyPayment, openRazorpayCheckout, openFundingForToken as openFundingForTokenApi, fundInvoiceDirect as fundInvoiceDirectApi, fetchInvoiceChainState, syncInvestorPosition as syncInvestorPositionApi, settleInvoiceViaBackend } from "../lib/api";
 import { useWeb3 } from "../context/Web3Context";
 import { getFundingPool, getFundingPoolRead, formatTokenValue, parseTokenValue, txUrl } from "../lib/contracts";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
@@ -90,6 +90,9 @@ export default function InvoiceDetailPage() {
             invoiceNumber: found.irn || `INV-${String(found.id).padStart(3, "0")}`,
             clientName: found.clientName || "",
             amount: Number(found.amount) || 0,
+            faceAmount: Number(found.faceAmount || found.amount) || 0,
+            discountedAmount: Number(found.discountedAmount || found.amount) || 0,
+            discountRate: Number(found.discountRate) || 0,
             fundedAmount: Number(found.fundedAmount) || 0,
             fundedPercent: found.amount > 0 ? Math.round((Number(found.fundedAmount) / Number(found.amount)) * 100) : 0,
             trustScore: found.riskScore ?? 75,
@@ -465,7 +468,8 @@ export default function InvoiceDetailPage() {
 
   const handleSettleViaUPI = async () => {
     if (!tokenId) { alert("Invoice not minted on-chain yet."); return; }
-    const totalAmount = realAmount || invoice?.amount || 0;
+    // Buyer pays the full face value (not the discounted funding target)
+    const totalAmount = invoice?.faceAmount || invoice?.amount || realAmount || 0;
     if (totalAmount <= 0) return;
 
     const INR_PER_USD = 83;
@@ -484,17 +488,47 @@ export default function InvoiceDetailPage() {
         description: `Settle Invoice #${tokenId} — ₹${Math.round(amountINR).toLocaleString()}`,
       });
 
-      setSettleLoading("Verifying…");
-      await verifyPayment(result);
+      setSettleLoading("Verifying & settling on-chain…");
+      const verifyResult = await verifyPayment(result);
 
       setSettleLoading("");
-      alert("Settlement payment received! Invoice will be settled on-chain shortly via webhook.");
+      if (verifyResult?.chainResult?.success) {
+        alert("Invoice settled on-chain! Tx: " + (verifyResult.chainResult.txHash || "").slice(0, 16) + "…");
+      } else if (verifyResult?.chainError) {
+        alert("Payment verified but on-chain settlement failed: " + verifyResult.chainError);
+      } else {
+        alert("Payment verified. Settlement will be processed shortly.");
+      }
+      await refreshChainState();
     } catch (err) {
       console.error("Settlement failed:", err);
       setSettleLoading("");
       if (err.message !== "Payment cancelled by user") {
         alert(err?.message || "Settlement payment failed");
       }
+    }
+  };
+
+  /* ── Settle Invoice via Wallet (buyer pays crypto) ── */
+  const handleSettleViaWallet = async () => {
+    if (!tokenId) { alert("Invoice not minted on-chain yet."); return; }
+    if (!isConnected) { connectWallet(); return; }
+    if (!isCorrectChain) { alert("Please switch to Base Sepolia network."); return; }
+
+    setSettleLoading("Settling on-chain…");
+    try {
+      const result = await settleInvoiceViaBackend(tokenId);
+      setSettleLoading("");
+      if (result.success) {
+        alert("Invoice settled on-chain! Tx: " + (result.txHash || "").slice(0, 16) + "…");
+      } else {
+        alert("Settlement failed: " + (result.reason || "Unknown error"));
+      }
+      await refreshChainState();
+    } catch (err) {
+      console.error("Wallet settlement failed:", err);
+      setSettleLoading("");
+      alert(err?.message || "Settlement failed");
     }
   };
 
@@ -636,6 +670,9 @@ export default function InvoiceDetailPage() {
       : `${Math.round(realFundedPercent)}%`;
   const fundingProgressWidth = Math.max(0, Math.min(100, realFundedPercent > 0 && realFundedPercent < 1 ? 1 : realFundedPercent));
 
+  const faceAmount = invoice?.faceAmount || invoice?.amount || realAmount || 0;
+  const discountRate = invoice?.discountRate || 0;
+
   return (
     <PageBackground className="page" style={{ background: "var(--bg)" }}>
       <div className="container" style={{ paddingTop: "2rem", paddingBottom: "4rem" }}>
@@ -673,7 +710,9 @@ export default function InvoiceDetailPage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1.25rem" }}>
                 {[
                   ["Invoice ID", invoiceNumber],
-                  ["Amount", `$${amount.toLocaleString()}`],
+                  ["Face Value", `$${faceAmount.toLocaleString()}`],
+                  ["Funding Target", `$${realAmount.toLocaleString()}`],
+                  ["Discount Rate", discountRate > 0 ? `${discountRate}%` : "—"],
                   ["Annual Yield", `${yld}%`],
                   ["Issued", issuedDate],
                   ["Due Date", dueDate],
@@ -964,13 +1003,13 @@ export default function InvoiceDetailPage() {
                   Buyer Settlement
                 </h3>
                 <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", marginBottom: "1rem", fontFamily: "var(--font-body)" }}>
-                  This invoice is fully funded. The corporate buyer can settle the invoice by paying via UPI/Card.
+                  This invoice is fully funded. The corporate buyer can settle the invoice by paying via UPI/Card or directly from their wallet.
                   Settlement triggers on-chain yield distribution to investors.
                 </p>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "rgba(180,83,9,0.08)", borderRadius: "8px" }}>
                   <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>Settlement Amount</span>
                   <span style={{ fontWeight: 700, color: "#92400E", fontFamily: "var(--font-body)" }}>
-                    ${realAmount.toLocaleString()} (~₹{Math.round(realAmount * 83).toLocaleString()})
+                    ${faceAmount.toLocaleString()} (~₹{Math.round(faceAmount * 83).toLocaleString()})
                   </span>
                 </div>
                 <button
@@ -981,8 +1020,16 @@ export default function InvoiceDetailPage() {
                 >
                   {settleLoading || "💳 Settle via UPI / Card"}
                 </button>
+                <button
+                  className="btn btn-outline"
+                  style={{ width: "100%", justifyContent: "center", borderColor: "#15803D", color: "#15803D", gap: "0.4rem", marginTop: "0.5rem" }}
+                  disabled={!!settleLoading}
+                  onClick={handleSettleViaWallet}
+                >
+                  {settleLoading || "🔗 Settle via Wallet"}
+                </button>
                 <p style={{ fontSize: "0.7rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.4rem", fontFamily: "var(--font-body)" }}>
-                  Razorpay webhook will trigger on-chain settlement automatically
+                  Pay via UPI/Card or trigger settlement directly from your wallet
                 </p>
               </div>
             )}

@@ -21,7 +21,7 @@ export const ABIS = {
     "function invest(uint256 tokenId) external payable",
     "function claimReturns(uint256 tokenId) external",
     "function transferInvestment(uint256 tokenId, address to, uint256 amount) external",
-    "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled))",
+    "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled, bool defaulted))",
     "function getInvestment(address, uint256) view returns (uint256)",
     "function hasClaimed(address, uint256) view returns (bool)",
     "event InvestmentMade(uint256 indexed tokenId, address indexed investor, uint256 amount)",

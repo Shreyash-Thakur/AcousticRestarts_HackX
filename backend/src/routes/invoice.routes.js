@@ -12,6 +12,7 @@ import {
   syncInvestorPosition,
   getInvoiceClaimsStatus,
   claimInvoiceReturnsBackend,
+  settleInvoiceViaWallet,
 } from "../controllers/invoice.controller.js";
 import { parseInvoiceFile } from "../controllers/parse.controller.js";
 
@@ -43,6 +44,7 @@ router.post("/invoice/token/:tokenId/sync-position", syncInvestorPosition);
 router.get("/invoice/token/:tokenId/chain-state", getInvoiceChainState);
 router.get("/invoice/token/:tokenId/claims", getInvoiceClaimsStatus);
 router.post("/invoice/token/:tokenId/claim-backend", claimInvoiceReturnsBackend);
+router.post("/invoice/token/:tokenId/settle", settleInvoiceViaWallet);
 router.get("/portfolio/:wallet", getInvestorPortfolio);
 
 // Backward-compatible aliases

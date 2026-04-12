@@ -19,11 +19,19 @@ const buildUnifiedInvoice = async (metadata) => {
   const fundedAmount = Math.min(Number(chainState.fundedAmount || 0), amount);
   const isPaid = Boolean(chainState.isPaid);
 
+  // Face value = original invoice amount; discountedAmount = funding target (from risk discount)
+  const faceAmount = Number(metadata.amount || 0);
+  const discountedAmount = Number(metadata.discountedAmount || faceAmount);
+  const discountRate = Number(metadata.discountRate || 0);
+
   return {
     id: metadata.id,
     businessName: metadata.businessName,
     clientName: metadata.clientName,
     amount,
+    faceAmount,
+    discountedAmount,
+    discountRate,
     fundedAmount,
     riskScore: risk.riskScore,
     riskLevel: risk.riskLevel,

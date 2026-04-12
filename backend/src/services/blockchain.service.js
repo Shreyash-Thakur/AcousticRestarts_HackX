@@ -25,12 +25,13 @@ const invoTokenAbi = [
   "function getInvoice(uint256) view returns (tuple(string irn, address sme, uint256 amount, uint256 dueDate, uint8 status))",
   "function valueOf(uint256) view returns (uint256)",
   "function totalSupply() view returns (uint256)",
+  "function ownerOf(uint256) view returns (address)",
   "function setInvoiceStatus(uint256, uint8) external",
   "event InvoiceMinted(uint256 indexed tokenId, uint256 indexed slot, string irn, address indexed sme, uint256 amount, uint256 dueDate)",
 ];
 const fundingPoolAbi = [
   "function openFunding(uint256 tokenId) external",
-  "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled))",
+  "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled, bool defaulted))",
   "function getInvestment(address, uint256) view returns (uint256)",
   "function hasClaimed(address, uint256) view returns (bool)",
   "function claimReturns(uint256 tokenId) external",
@@ -582,7 +583,17 @@ export const getChainStats = async () => {
 
 /* ── INR → ETH conversion ── */
 const INR_PER_ETH = Number(process.env.INR_PER_ETH) || 250000;
+const INR_PER_USD = 83;
 
+/**
+ * Convert INR to 6-decimal token units (matching InvoToken.valueOf / FundingPool.targetAmount).
+ */
+export const convertINRtoTokenValue = (amountINR) => {
+  const usd = amountINR / INR_PER_USD;
+  return ethers.parseUnits(usd.toFixed(6), 6);
+};
+
+// Legacy: actual ETH conversion (for reference/settlement)
 export const convertINRtoWei = (amountINR) => {
   const ethAmount = amountINR / INR_PER_ETH;
   return ethers.parseEther(ethAmount.toFixed(18));
@@ -634,7 +645,7 @@ export const investOnBehalf = async (tokenId, investorWallet, amountINR) => {
     let transferTxHash = null;
     if (investorWallet && investorWallet !== wallet.address) {
       try {
-        const transferTx = await fundingPoolWrite.transferInvestment(tokenId, investorWallet, amountWei, { gasLimit: 300000n });
+        const transferTx = await fundingPoolWrite.transferInvestment(tokenId, investorWallet, amountTokenValue, { gasLimit: 300000n });
         const transferReceipt = await transferTx.wait();
         transferTxHash = transferReceipt.hash;
 
@@ -654,7 +665,7 @@ export const investOnBehalf = async (tokenId, investorWallet, amountINR) => {
       success: true,
       investTxHash: investReceipt.hash,
       transferTxHash,
-      amountETH: ethers.formatEther(amountWei),
+      amountUSD: Number(ethers.formatUnits(amountTokenValue, 6)),
     };
   } catch (err) {
     console.error("investOnBehalf error:", err.message);
@@ -722,6 +733,76 @@ export const getExpiredUnfundedTokens = async () => {
   }
 };
 
+/**
+ * Early Backstop: After 20% of the funding period has elapsed,
+ * if funding is above 40% of the target, the platform fills the remaining gap
+ * by investing directly (using invest(), not platformBackstop which requires full deadline).
+ */
+export const getEarlyBackstopCandidates = async () => {
+  if (!blockchainEnabled || !invoTokenRead || !fundingPoolRead) return [];
+  try {
+    const supply = Number(await invoTokenRead.totalSupply());
+    const candidates = [];
+    const now = Math.floor(Date.now() / 1000);
+    const FUNDING_PERIOD = 2 * 7 * 24 * 60 * 60; // 2 weeks in seconds
+
+    for (let i = 1; i <= supply; i++) {
+      try {
+        const fi = await fundingPoolRead.getFundingInfo(i);
+        if (fi.targetAmount === 0n || fi.fullyFunded || fi.defaulted) continue;
+
+        const deadline = Number(fi.fundingDeadline);
+        if (deadline === 0) continue;
+
+        const openedAt = deadline - FUNDING_PERIOD;
+        const elapsed = now - openedAt;
+        const twentyPercent = FUNDING_PERIOD * 0.2;
+
+        if (elapsed < twentyPercent || now >= deadline) continue;
+
+        const fundedPercent = Number(fi.fundedAmount * 10000n / fi.targetAmount) / 100;
+        if (fundedPercent < 40) continue;
+
+        candidates.push({
+          tokenId: i,
+          remaining: fi.targetAmount - fi.fundedAmount,
+          fundedPercent,
+          deadline,
+        });
+      } catch { /* skip */ }
+    }
+    return candidates;
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * Platform invests the remaining gap using invest() (not platformBackstop).
+ * This allows early filling before the deadline has passed.
+ */
+export const earlyBackstopInvest = async (tokenId) => {
+  if (!blockchainEnabled || !fundingPoolWrite || !fundingPoolRead) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+  try {
+    const fi = await fundingPoolRead.getFundingInfo(tokenId);
+    if (fi.fullyFunded) return { success: false, reason: "already_funded" };
+    if (fi.targetAmount === 0n) return { success: false, reason: "not_open" };
+
+    const remaining = fi.targetAmount - fi.fundedAmount;
+    const tx = await fundingPoolWrite.invest(tokenId, {
+      value: remaining,
+      gasLimit: 600000n,
+    });
+    const receipt = await tx.wait();
+
+    return { success: true, txHash: receipt.hash, amount: ethers.formatUnits(remaining, 6) };
+  } catch (err) {
+    console.error("earlyBackstopInvest error:", err.message);
+    return { success: false, reason: err.message };
+  }
+};
 export const getSettlementAmountOnChain = async (tokenId) => {
   if (!blockchainEnabled || !fundingPoolRead) return { success: false, reason: "blockchain_disabled" };
 

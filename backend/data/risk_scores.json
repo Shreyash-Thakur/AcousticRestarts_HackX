@@ -1,1 +1,38 @@
-[]
+{
+  "Tata Consultancy Services": {
+    "rawScore": 100,
+    "riskLevel": "Low",
+    "subScores": {
+      "paymentReliability": 100,
+      "invoiceLegitimacy": 100,
+      "businessProfile": 100
+    },
+    "invoiceCount": 3,
+    "insufficientHistory": true,
+    "lastUpdated": "2026-04-12T02:55:55.804Z"
+  },
+  "Reliance Retail Ltd": {
+    "rawScore": 100,
+    "riskLevel": "Low",
+    "subScores": {
+      "paymentReliability": 100,
+      "invoiceLegitimacy": 100,
+      "businessProfile": 100
+    },
+    "invoiceCount": 1,
+    "insufficientHistory": true,
+    "lastUpdated": "2026-04-12T02:56:12.706Z"
+  },
+  "Aditya Birla Finance": {
+    "rawScore": 100,
+    "riskLevel": "Low",
+    "subScores": {
+      "paymentReliability": 100,
+      "invoiceLegitimacy": 100,
+      "businessProfile": 100
+    },
+    "invoiceCount": 2,
+    "insufficientHistory": true,
+    "lastUpdated": "2026-04-12T05:01:07.632Z"
+  }
+}

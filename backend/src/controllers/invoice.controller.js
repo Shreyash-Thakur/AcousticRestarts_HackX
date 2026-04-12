@@ -18,8 +18,9 @@ import {
   syncInvestmentPosition,
   getClaimsStatusOnChain,
   claimReturnsWithBackendWallet,
+  settleInvoiceOnChain,
 } from "../services/blockchain.service.js";
-import { recomputeRiskForClient } from "../services/risk.service.js";
+import { recomputeRiskForClient, getRiskInsights } from "../services/risk.service.js";
 
 const isValidDate = (value) => !Number.isNaN(Date.parse(value));
 
@@ -113,13 +114,21 @@ export const createInvoice = async (req, res) => {
     // Recompute risk score now that this client has a new invoice
     recomputeRiskForClient(clientName);
 
+    // Apply discount based on risk: lower risk → lower discount rate
+    const riskInsights = getRiskInsights(clientName);
+    const discountRate = riskInsights.returnRate; // 7.0% (Low) – 14.7% (High)
+    const discountedAmount = parseFloat((parsedAmount * (1 - discountRate / 100)).toFixed(2));
+
+    // Update invoice with discount info
+    updateInvoice(id, { discountedAmount, discountRate });
+
     // Try to mint on-chain (non-blocking for response)
     let chainResult = { success: false };
     try {
       chainResult = await mintAndOpenFunding({
         smeWallet,
         invoiceId: id,
-        amount: parsedAmount,
+        amount: discountedAmount, // mint with discounted amount as funding target
         dueDate,
       });
       if (chainResult.success) {
@@ -399,5 +408,24 @@ export const claimInvoiceReturnsBackend = async (req, res) => {
   } catch (error) {
     console.error("claimInvoiceReturnsBackend error:", error);
     return res.status(500).json({ message: "Failed to claim returns" });
+  }
+};
+
+export const settleInvoiceViaWallet = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const tid = Number(tokenId);
+    if (!Number.isFinite(tid) || tid < 1) {
+      return res.status(400).json({ message: "Invalid tokenId" });
+    }
+    const result = await settleInvoiceOnChain(tid, 0);
+    if (!result.success) {
+      return res.status(400).json({ message: "Settlement failed", ...result });
+    }
+    updateInvoice(tid, { settlementTxHash: result.txHash, settledAt: new Date().toISOString() });
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("settleInvoiceViaWallet error:", error);
+    return res.status(500).json({ message: "Failed to settle invoice" });
   }
 };

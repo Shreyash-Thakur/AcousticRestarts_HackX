@@ -195,6 +195,21 @@ export async function cancelListingApi(listingId, sellerWallet) {
 /* ── UPI / Razorpay Payments ── */
 
 /**
+ * Settle an invoice on-chain via backend wallet (buyer triggers after paying with their wallet).
+ */
+export async function settleInvoiceViaBackend(tokenId) {
+  const res = await fetch(`${API_BASE}/invoice/token/${tokenId}/settle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
  * Create a Razorpay order for settlement (buyer pays invoice) or investment (fund via UPI).
  * @param {{ tokenId, amountINR, purpose: "settlement"|"investment", investorWallet? }} opts
  * @returns {{ orderId, amount, currency, key_id }}

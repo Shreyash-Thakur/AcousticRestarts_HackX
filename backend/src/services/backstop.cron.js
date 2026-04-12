@@ -1,10 +1,31 @@
-import { getExpiredUnfundedTokens, callPlatformBackstop } from "./blockchain.service.js";
+import {
+  getExpiredUnfundedTokens,
+  callPlatformBackstop,
+  getEarlyBackstopCandidates,
+  earlyBackstopInvest,
+} from "./blockchain.service.js";
 
 const INTERVAL_MS = 10 * 60 * 1000; // check every 10 minutes
 let timer = null;
 
 async function runBackstopCheck() {
   try {
+    // ── 1. Early backstop: 20% of period elapsed + >40% funded → platform fills gap ──
+    const earlyCandidates = await getEarlyBackstopCandidates();
+    if (earlyCandidates.length > 0) {
+      console.log(`[Backstop] Found ${earlyCandidates.length} early backstop candidate(s) (>40% funded, >20% period elapsed)`);
+      for (const { tokenId, fundedPercent } of earlyCandidates) {
+        console.log(`[Backstop] Early fill tokenId=${tokenId} (${fundedPercent.toFixed(1)}% funded) ...`);
+        const result = await earlyBackstopInvest(tokenId);
+        if (result.success) {
+          console.log(`[Backstop] ✓ tokenId=${tokenId} early backstopped, tx=${result.txHash}`);
+        } else {
+          console.warn(`[Backstop] ✗ tokenId=${tokenId} early backstop failed: ${result.reason}`);
+        }
+      }
+    }
+
+    // ── 2. Full deadline backstop: deadline passed → platform fills via platformBackstop() ──
     const expired = await getExpiredUnfundedTokens();
     if (expired.length === 0) return;
 

@@ -2,7 +2,10 @@ import {
   createPaymentOrder,
   createPaymentLink,
   verifyPaymentSignature,
+  consumePendingOrder,
 } from "../services/payment.service.js";
+import { investOnBehalf, settleInvoiceOnChain } from "../services/blockchain.service.js";
+import { updateInvoice } from "../../data/invoices.js";
 
 /**
  * POST /api/payments/create-order
@@ -75,6 +78,30 @@ export const verifyPayment = async (req, res) => {
     const valid = verifyPaymentSignature({ orderId, paymentId, signature });
     if (!valid) {
       return res.status(400).json({ message: "Invalid payment signature", verified: false });
+    }
+
+    // After signature is valid, trigger on-chain action based on stored order metadata
+    const meta = consumePendingOrder(orderId);
+    if (meta) {
+      try {
+        if (meta.purpose === "investment" && meta.investorWallet) {
+          const result = await investOnBehalf(Number(meta.tokenId), meta.investorWallet, meta.amountINR);
+          console.log(`[verifyPayment] investOnBehalf tokenId=${meta.tokenId}:`, result);
+          return res.json({ verified: true, orderId, paymentId, chainResult: result });
+        }
+
+        if (meta.purpose === "settlement") {
+          const result = await settleInvoiceOnChain(Number(meta.tokenId), meta.amountINR);
+          console.log(`[verifyPayment] settleInvoice tokenId=${meta.tokenId}:`, result);
+          if (result.success) {
+            updateInvoice(Number(meta.tokenId), { settlementTxHash: result.txHash, settledAt: new Date().toISOString() });
+          }
+          return res.json({ verified: true, orderId, paymentId, chainResult: result });
+        }
+      } catch (chainErr) {
+        console.error(`[verifyPayment] On-chain action failed:`, chainErr);
+        return res.json({ verified: true, orderId, paymentId, chainError: chainErr.message });
+      }
     }
 
     return res.json({ verified: true, orderId, paymentId });
