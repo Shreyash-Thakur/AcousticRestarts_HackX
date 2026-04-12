@@ -250,7 +250,48 @@ export const getStats = async (_req, res) => {
 export const openFundingForToken = async (req, res) => {
   try {
     const { tokenId } = req.params;
-    const result = await ensureFundingOpenOnChain(tokenId);
+    let result = await ensureFundingOpenOnChain(tokenId);
+
+    // Auto-heal stale local token references (e.g., contract redeploy changed token set).
+    if (!result.success && result.reason === "token_not_minted") {
+      const parsedTokenId = Number(tokenId);
+      const raw = getRawInvoices();
+      const matched = raw.find((r) => Number(r.tokenId) === parsedTokenId);
+
+      if (matched) {
+        const remint = await mintAndOpenFunding({
+          smeWallet: matched.smeWallet,
+          invoiceId: matched.id,
+          amount: Number(matched.amount),
+          dueDate: matched.dueDate,
+        });
+
+        if (remint.success) {
+          updateInvoice(matched.id, {
+            tokenId: remint.tokenId,
+            mintTxHash: remint.mintTxHash,
+            fundingTxHash: remint.fundingTxHash,
+            irn: remint.irn,
+          });
+
+          return res.status(200).json({
+            success: true,
+            openedNow: true,
+            healedStaleToken: true,
+            oldTokenId: parsedTokenId,
+            remintedTokenId: remint.tokenId,
+            mintTxHash: remint.mintTxHash,
+            fundingTxHash: remint.fundingTxHash,
+            targetAmount: Number(matched.amount) || 0,
+          });
+        }
+
+        result = {
+          success: false,
+          reason: remint.reason || "remint_failed",
+        };
+      }
+    }
 
     if (!result.success) {
       return res.status(400).json({

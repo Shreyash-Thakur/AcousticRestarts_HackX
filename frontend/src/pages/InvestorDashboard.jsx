@@ -77,10 +77,13 @@ function YieldRiskChart({ positions }) {
 export default function InvestorDashboard() {
   const navigate = useNavigate();
   const { account, isConnected } = useWeb3();
-  const [listed, setListed] = useState({});
   const [positions, setPositions] = useState([]);
   const [loadingChain, setLoadingChain] = useState(false);
-  const handleList = (id) => setListed((prev) => ({ ...prev, [id]: !prev[id] }));
+  const handleList = (pos) => {
+    const invoiceId = pos.tokenId || pos.id;
+    if (!invoiceId) return;
+    navigate(`/invoice/${invoiceId}?sell=1`);
+  };
 
   // Read on-chain positions for connected wallet
   useEffect(() => {
@@ -253,25 +256,26 @@ export default function InvestorDashboard() {
                         <button
                           className="btn btn-ghost btn-sm"
                           style={{ fontSize: "0.74rem", display: "flex", alignItems: "center", gap: "0.3rem", color: "var(--text-muted)" }}
-                          onClick={() => navigate(`/invoice/${pos.id}`)}
+                          onClick={() => navigate(`/invoice/${pos.tokenId || pos.id}`)}
                         >
                           View <ExternalIcon />
                         </button>
                         <button
                           className="btn btn-sm"
-                          onClick={() => handleList(pos.id)}
+                          onClick={() => handleList(pos)}
+                          disabled={!pos.tokenId}
                           style={{
                             fontSize: "0.74rem",
                             display: "flex",
                             alignItems: "center",
                             gap: "0.3rem",
-                            background: listed[pos.id] ? "#DCFCE7" : "var(--surface)",
-                            border: `1.5px solid ${listed[pos.id] ? "rgba(21,128,61,0.3)" : "var(--border)"}`,
-                            color: listed[pos.id] ? "#15803D" : "var(--text-muted)",
+                            background: "var(--surface)",
+                            border: "1.5px solid var(--border)",
+                            color: "var(--text-muted)",
                             borderRadius: "var(--radius)",
                           }}
                         >
-                          <TagIcon /> {listed[pos.id] ? "Listed" : "List for Sale"}
+                          <TagIcon /> {pos.tokenId ? "List for Sale" : "Unavailable"}
                         </button>
                       </div>
                     </div>

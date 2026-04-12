@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  getListingConfig,
   createListing,
   getListings,
   buyListing,
@@ -8,6 +9,7 @@ import {
 
 const router = Router();
 
+router.get("/listings/config", getListingConfig);
 router.post("/listings", createListing);
 router.get("/listings", getListings);
 router.post("/listings/:id/buy", buyListing);

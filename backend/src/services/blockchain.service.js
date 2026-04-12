@@ -64,6 +64,8 @@ const fundingPoolWrite =
     ? new ethers.Contract(FUNDING_POOL_ADDRESS, fundingPoolAbi, wallet)
     : null;
 
+export const getBackendWalletAddress = () => (wallet ? wallet.address : null);
+
 /* ── Helpers ── */
 const seededRandom = (seed) => {
   const value = Math.sin(seed) * 10000;
@@ -111,8 +113,18 @@ export const getChainInvoice = async (invoiceId, amount) => {
       tokenId: parsedId,
       onChainStatus: Number(info.status),
     };
-  } catch {
-    return fallbackState(invoiceId, amount);
+  } catch (err) {
+    // Token id exists in local DB but is not readable on current chain deployment.
+    // Do not show simulated funding in this case; force a safe zero-funded state.
+    return {
+      amount: Number(amount) || 0,
+      fundedAmount: 0,
+      isPaid: false,
+      blockchainAvailable: true,
+      tokenId: parsedId,
+      tokenMissing: true,
+      reason: err?.message || "token_not_minted",
+    };
   }
 };
 export const getInvoiceOnChain = getChainInvoice;
@@ -129,6 +141,13 @@ export const ensureFundingOpenOnChain = async (tokenId) => {
   }
 
   try {
+    // Guard: token must exist on-chain.
+    try {
+      await invoTokenRead.ownerOf(parsedTokenId);
+    } catch {
+      return { success: false, reason: "token_not_minted" };
+    }
+
     // If already open, return fast.
     const current = await fundingPoolRead.getFundingInfo(parsedTokenId);
     const currentTarget = Number(ethers.formatUnits(current.targetAmount, 6));
@@ -142,10 +161,7 @@ export const ensureFundingOpenOnChain = async (tokenId) => {
     }
 
     // Open now via admin/deployer wallet.
-    const data = fundingPoolWrite.interface.encodeFunctionData("openFunding", [parsedTokenId]);
-    const tx = await wallet.sendTransaction({
-      to: FUNDING_POOL_ADDRESS,
-      data,
+    const tx = await fundingPoolWrite.openFunding(parsedTokenId, {
       gasLimit: 500000n,
     });
     const receipt = await tx.wait();
@@ -189,6 +205,12 @@ export const fundInvoiceFromBackend = async ({ tokenId, amountUsd, investorWalle
   }
 
   try {
+    try {
+      await invoTokenRead.ownerOf(parsedTokenId);
+    } catch {
+      return { success: false, reason: "token_not_minted" };
+    }
+
     const openResult = await ensureFundingOpenOnChain(parsedTokenId);
     if (!openResult.success) {
       return { success: false, reason: openResult.reason || "open_funding_failed" };
@@ -431,6 +453,44 @@ export const syncInvestmentPosition = async ({ tokenId, investorWallet, deltaAmo
   }
 };
 
+export const transferEscrowedPositionOnChain = async ({ tokenId, toWallet, amount }) => {
+  if (!blockchainEnabled || !fundingPoolWrite || !fundingPoolRead || !wallet) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+
+  const parsedTokenId = Number(tokenId);
+  const parsedAmount = Number(amount);
+  if (!Number.isFinite(parsedTokenId) || parsedTokenId < 1) {
+    return { success: false, reason: "invalid_token_id" };
+  }
+  if (!toWallet || !ethers.isAddress(toWallet)) {
+    return { success: false, reason: "invalid_to_wallet" };
+  }
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    return { success: false, reason: "invalid_amount" };
+  }
+
+  try {
+    const transferAmount = ethers.parseUnits(String(parsedAmount), 6);
+    const tx = await fundingPoolWrite.transferInvestment(parsedTokenId, toWallet, transferAmount, {
+      gasLimit: 300000n,
+    });
+    const receipt = await tx.wait();
+
+    const updated = await fundingPoolRead.getInvestment(toWallet, parsedTokenId);
+    setInvestmentPosition({
+      tokenId: parsedTokenId,
+      investorWallet: toWallet,
+      amount: Number(ethers.formatUnits(updated, 6)),
+      txHash: receipt.hash,
+    });
+
+    return { success: true, txHash: receipt.hash };
+  } catch (err) {
+    return { success: false, reason: err.message || "transfer_failed" };
+  }
+};
+
 /* ── Mint invoice on-chain + open funding ── */
 export const mintAndOpenFunding = async ({ smeWallet, invoiceId, amount, dueDate }) => {
   if (!blockchainEnabled || !invoTokenWrite) {
@@ -466,10 +526,7 @@ export const mintAndOpenFunding = async ({ smeWallet, invoiceId, amount, dueDate
     let fundingTx = null;
     if (fundingPoolWrite && wallet) {
       try {
-        const data = fundingPoolWrite.interface.encodeFunctionData("openFunding", [tokenId]);
-        const ftx = await wallet.sendTransaction({
-          to: FUNDING_POOL_ADDRESS,
-          data,
+        const ftx = await fundingPoolWrite.openFunding(tokenId, {
           gasLimit: 500000n,
         });
         fundingTx = await ftx.wait();

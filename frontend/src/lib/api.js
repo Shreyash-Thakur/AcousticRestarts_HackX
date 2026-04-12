@@ -74,7 +74,8 @@ export async function openFundingForToken(tokenId) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: "Request failed" }));
-    throw new Error(err.message || err.reason || `HTTP ${res.status}`);
+    const detail = err.reason || err.error;
+    throw new Error(detail ? `${err.message || "Request failed"}: ${detail}` : (err.message || `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -87,7 +88,8 @@ export async function fundInvoiceDirect(tokenId, { amountUsd, investorWallet }) 
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: "Request failed" }));
-    throw new Error(err.message || err.reason || `HTTP ${res.status}`);
+    const detail = err.reason || err.error;
+    throw new Error(detail ? `${err.message || "Request failed"}: ${detail}` : (err.message || `HTTP ${res.status}`));
   }
   return res.json();
 }
@@ -126,12 +128,21 @@ export async function fetchInvestorPortfolio(wallet) {
 
 /* ── Secondary Market Listings ── */
 
-export async function createListing({ tokenId, sellerWallet, amount, askingPrice }) {
+export async function createListing({ tokenId, sellerWallet, amount, askingPrice, escrowTxHash }) {
   const res = await fetch(`${API_BASE}/listings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tokenId, sellerWallet, amount, askingPrice }),
+    body: JSON.stringify({ tokenId, sellerWallet, amount, askingPrice, escrowed: true, escrowTxHash }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchListingConfig() {
+  const res = await fetch(`${API_BASE}/listings/config`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: "Request failed" }));
     throw new Error(err.message || `HTTP ${res.status}`);

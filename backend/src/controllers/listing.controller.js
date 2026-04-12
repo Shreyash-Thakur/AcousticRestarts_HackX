@@ -5,15 +5,26 @@ import {
   updateListing,
   findListing,
 } from "../../data/listings.js";
+import { getBackendWalletAddress, transferEscrowedPositionOnChain } from "../services/blockchain.service.js";
+
+export function getListingConfig(_req, res) {
+  res.json({
+    escrowWallet: getBackendWalletAddress(),
+    automatedTransfer: true,
+  });
+}
 
 export function createListing(req, res) {
-  const { tokenId, sellerWallet, amount, askingPrice } = req.body;
+  const { tokenId, sellerWallet, amount, askingPrice, escrowed, escrowTxHash } = req.body;
 
   if (!tokenId || !sellerWallet || !amount || !askingPrice) {
     return res.status(400).json({ message: "tokenId, sellerWallet, amount, askingPrice are required" });
   }
   if (Number(amount) <= 0 || Number(askingPrice) <= 0) {
     return res.status(400).json({ message: "amount and askingPrice must be positive" });
+  }
+  if (!escrowed || !escrowTxHash) {
+    return res.status(400).json({ message: "Escrow transfer is required before listing" });
   }
 
   const existing = findListing(
@@ -37,6 +48,9 @@ export function createListing(req, res) {
     createdAt: new Date().toISOString(),
     buyerWallet: null,
     soldAt: null,
+    escrowed: true,
+    escrowTxHash,
+    positionTransferTxHash: null,
   });
 
   res.status(201).json(listing);
@@ -49,7 +63,7 @@ export function getListings(req, res) {
   res.json(result);
 }
 
-export function buyListing(req, res) {
+export async function buyListing(req, res) {
   const { id } = req.params;
   const { buyerWallet, txHash } = req.body;
 
@@ -64,17 +78,35 @@ export function buyListing(req, res) {
     return res.status(400).json({ message: "Cannot buy your own listing" });
   }
 
+  let positionTransferTxHash = null;
+  if (listing.escrowed) {
+    const transferResult = await transferEscrowedPositionOnChain({
+      tokenId: listing.tokenId,
+      toWallet: buyerWallet,
+      amount: listing.amount,
+    });
+    if (!transferResult.success) {
+      return res.status(400).json({
+        message: "Payment recorded but automated position transfer failed",
+        reason: transferResult.reason,
+      });
+    }
+    positionTransferTxHash = transferResult.txHash;
+  }
+
   const updated = updateListing(id, {
     status: "sold",
     buyerWallet,
     txHash: txHash || null,
     soldAt: new Date().toISOString(),
+    autoTransferred: Boolean(listing.escrowed),
+    positionTransferTxHash,
   });
 
   res.json(updated);
 }
 
-export function cancelListing(req, res) {
+export async function cancelListing(req, res) {
   const { id } = req.params;
   const sellerWallet = req.query.sellerWallet || req.body?.sellerWallet;
 
@@ -83,6 +115,20 @@ export function cancelListing(req, res) {
   if (listing.status !== "active") return res.status(409).json({ message: "Listing is no longer active" });
   if (!sellerWallet || listing.sellerWallet.toLowerCase() !== sellerWallet.toLowerCase()) {
     return res.status(403).json({ message: "Only the seller can cancel" });
+  }
+
+  if (listing.escrowed) {
+    const returnResult = await transferEscrowedPositionOnChain({
+      tokenId: listing.tokenId,
+      toWallet: sellerWallet,
+      amount: listing.amount,
+    });
+    if (!returnResult.success) {
+      return res.status(400).json({
+        message: "Failed to return escrowed position to seller",
+        reason: returnResult.reason,
+      });
+    }
   }
 
   const updated = updateListing(id, { status: "cancelled" });

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { fetchInvoices, createListing, fetchListings, buyListingApi, cancelListingApi, createPaymentOrder, verifyPayment, openRazorpayCheckout, openFundingForToken as openFundingForTokenApi, fundInvoiceDirect as fundInvoiceDirectApi, fetchInvoiceChainState, syncInvestorPosition as syncInvestorPositionApi } from "../lib/api";
+import { fetchInvoices, createListing, fetchListingConfig, fetchListings, buyListingApi, cancelListingApi, createPaymentOrder, verifyPayment, openRazorpayCheckout, openFundingForToken as openFundingForTokenApi, fundInvoiceDirect as fundInvoiceDirectApi, fetchInvoiceChainState, syncInvestorPosition as syncInvestorPositionApi } from "../lib/api";
 import { useWeb3 } from "../context/Web3Context";
 import { getFundingPool, getFundingPoolRead, formatTokenValue, parseTokenValue, txUrl } from "../lib/contracts";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
@@ -42,7 +42,8 @@ const riskClass = (level) => `badge badge-${level.toLowerCase()}`;
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { signer, account, isConnected, isCorrectChain, connectWallet } = useWeb3();
+  const location = useLocation();
+  const { signer, account, isConnected, isCorrectChain, connectWallet, userRole } = useWeb3();
 
   const [liveInvoice, setLiveInvoice] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -188,6 +189,10 @@ export default function InvoiceDetailPage() {
   /* ── Fund on-chain ── */
   const handleFund = async () => {
     if (!isConnected) { connectWallet(); return; }
+    if (selfInvestBlocked) {
+      alert(userRole === "sme" ? "SME accounts cannot invest in invoices from this page." : "You cannot invest in your own active listing.");
+      return;
+    }
     if (!isCorrectChain) { alert("Please switch to Base Sepolia network."); return; }
     if (!tokenId) { alert("This invoice is not yet minted on-chain."); return; }
 
@@ -207,27 +212,29 @@ export default function InvoiceDetailPage() {
       setFundingLoading("Opening funding pool…");
       try {
         const openResult = await openFundingForTokenApi(tokenId);
+        if (openResult?.healedStaleToken && openResult?.remintedTokenId) {
+          setFundingLoading("");
+          navigate(`/invoice/${openResult.remintedTokenId}`);
+          return;
+        }
         if (openResult?.success) {
           isOpen = true;
         }
       } catch (err) {
-        setFundingLoading("");
-        alert(err?.message || "Failed to open funding pool on backend.");
+        console.warn("openFundingForTokenApi failed, continuing with invest attempt:", err?.message || err);
       }
       if (!isOpen) {
         isOpen = await ensureFundingIsOpen();
       }
-      if (!isOpen) {
-        alert("Funding pool is not open for this invoice yet. Please wait a moment and try again.");
-        return;
+      if (isOpen) {
+        const fi = await getFundingPoolRead().getFundingInfo(tokenId);
+        setChainFunding({
+          targetAmount: formatTokenValue(fi.targetAmount),
+          fundedAmount: formatTokenValue(fi.fundedAmount),
+          fullyFunded: fi.fullyFunded,
+          settled: fi.settled,
+        });
       }
-      const fi = await getFundingPoolRead().getFundingInfo(tokenId);
-      setChainFunding({
-        targetAmount: formatTokenValue(fi.targetAmount),
-        fundedAmount: formatTokenValue(fi.fundedAmount),
-        fullyFunded: fi.fullyFunded,
-        settled: fi.settled,
-      });
     }
 
     const parsedAmt = parseFloat(investAmount.replace(/,/g, "")) || 0;
@@ -347,12 +354,30 @@ export default function InvoiceDetailPage() {
   };
 
   const holdsPosition = myPosition > 0;
+  const isOwnActiveListing = Boolean(
+    myListing &&
+    account &&
+    String(myListing.sellerWallet || "").toLowerCase() === String(account).toLowerCase()
+  );
+  const selfInvestBlocked = userRole === "sme" || isOwnActiveListing;
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const sellIntent = params.get("sell") === "1";
+    if (sellIntent && holdsPosition && !myListing) {
+      setListForSale(true);
+    }
+  }, [location.search, holdsPosition, myListing]);
 
   /* ── Fund This Invoice via UPI (Razorpay) ── */
   const [upiLoading, setUpiLoading] = useState("");
   const [upiSuccess, setUpiSuccess] = useState(false);
 
   const handleFundViaUPI = async () => {
+    if (selfInvestBlocked) {
+      alert(userRole === "sme" ? "SME accounts cannot invest in invoices from this page." : "You cannot invest in your own active listing.");
+      return;
+    }
     if (!tokenId) { alert("Invoice not minted on-chain yet."); return; }
 
     let isOpen = await ensureFundingIsOpen();
@@ -360,27 +385,29 @@ export default function InvoiceDetailPage() {
       setUpiLoading("Opening funding pool…");
       try {
         const openResult = await openFundingForTokenApi(tokenId);
+        if (openResult?.healedStaleToken && openResult?.remintedTokenId) {
+          setUpiLoading("");
+          navigate(`/invoice/${openResult.remintedTokenId}`);
+          return;
+        }
         if (openResult?.success) {
           isOpen = true;
         }
       } catch (err) {
-        setUpiLoading("");
-        alert(err?.message || "Failed to open funding pool on backend.");
+        console.warn("openFundingForTokenApi failed for UPI, continuing:", err?.message || err);
       }
       if (!isOpen) {
         isOpen = await ensureFundingIsOpen();
       }
-      if (!isOpen) {
-        alert("Funding pool is not open for this invoice yet. Please wait a moment and try again.");
-        return;
+      if (isOpen) {
+        const fi = await getFundingPoolRead().getFundingInfo(tokenId);
+        setChainFunding({
+          targetAmount: formatTokenValue(fi.targetAmount),
+          fundedAmount: formatTokenValue(fi.fundedAmount),
+          fullyFunded: fi.fullyFunded,
+          settled: fi.settled,
+        });
       }
-      const fi = await getFundingPoolRead().getFundingInfo(tokenId);
-      setChainFunding({
-        targetAmount: formatTokenValue(fi.targetAmount),
-        fundedAmount: formatTokenValue(fi.fundedAmount),
-        fullyFunded: fi.fullyFunded,
-        settled: fi.settled,
-      });
     }
     const parsedAmt = parseFloat(investAmount.replace(/,/g, "")) || 0;
     if (parsedAmt < 1) {
@@ -480,18 +507,32 @@ export default function InvoiceDetailPage() {
     const price = parseFloat(listingPrice.replace(/,/g, "")) || 0;
     if (price <= 0) { alert("Enter a valid asking price."); return; }
 
-    setListingLoading("Creating listing…");
+    setListingLoading("Escrowing position…");
     try {
+      const cfg = await fetchListingConfig();
+      const escrowWallet = cfg?.escrowWallet;
+      if (!escrowWallet) {
+        throw new Error("Escrow wallet is not configured");
+      }
+
+      const pool = getFundingPool(signer);
+      const transferAmount = parseTokenValue(myPosition);
+      const escrowTx = await pool.transferInvestment(tokenId, escrowWallet, transferAmount);
+      const escrowReceipt = await escrowTx.wait();
+
+      setListingLoading("Creating listing…");
       const listing = await createListing({
         tokenId,
         sellerWallet: account,
         amount: myPosition,
         askingPrice: price,
+        escrowTxHash: escrowReceipt.hash,
       });
       setMyListing(listing);
       setListForSale(true);
       setListingLoading("");
       setListingPrice("");
+      await refreshChainState();
     } catch (err) {
       setListingLoading("");
       alert(err.message || "Failed to create listing");
@@ -514,6 +555,10 @@ export default function InvoiceDetailPage() {
   /* ── Buy a listed position ── */
   const handleBuyListing = async (listing) => {
     if (!isConnected) { connectWallet(); return; }
+    if (String(listing?.sellerWallet || "").toLowerCase() === String(account || "").toLowerCase()) {
+      alert("This is your own listing. Use Cancel instead.");
+      return;
+    }
     if (!isCorrectChain) { alert("Please switch to Base Sepolia network."); return; }
 
     setBuyingId(listing.id);
@@ -531,10 +576,15 @@ export default function InvoiceDetailPage() {
       const receipt = await tx.wait();
 
       // Mark listing as sold on backend
-      await buyListingApi(listing.id, { buyerWallet: account, txHash: receipt.hash });
+      const buyRes = await buyListingApi(listing.id, { buyerWallet: account, txHash: receipt.hash });
 
-      alert("Position purchased! The seller will transfer the on-chain position to you.");
+      if (buyRes?.autoTransferred) {
+        alert("Position purchased and transferred to your wallet automatically.");
+      } else {
+        alert("Purchase recorded. Manual transfer is still required for this legacy listing.");
+      }
       refreshListings();
+      await refreshChainState();
 
       // Refresh balances
       provider.getBalance(account).then((b) => setEthBalance(Number(ethers.formatEther(b)))).catch(() => {});
@@ -735,6 +785,22 @@ export default function InvoiceDetailPage() {
                   Fund This Invoice
                 </h3>
 
+                {selfInvestBlocked && (
+                  <div style={{
+                    padding: "0.75rem 0.9rem",
+                    background: "#FEF2F2",
+                    border: "1px solid rgba(185,28,28,0.2)",
+                    borderRadius: "10px",
+                    marginBottom: "0.9rem",
+                  }}>
+                    <p style={{ fontSize: "0.82rem", color: "#B91C1C", fontFamily: "var(--font-body)", margin: 0 }}>
+                      {userRole === "sme"
+                        ? "Funding is disabled for SME role. Switch to Investor to invest."
+                        : "Funding is disabled because this invoice has your active listing."}
+                    </p>
+                  </div>
+                )}
+
                 <div className="form-group" style={{ marginBottom: "1rem" }}>
                   <label>Investment Amount (USD)</label>
                   <input
@@ -820,20 +886,20 @@ export default function InvoiceDetailPage() {
                 <button
                   className="btn btn-gold"
                   style={{ width: "100%", justifyContent: "center" }}
-                  disabled={!isConnected || !parsedAmount || parsedAmount > remainingCapacity || parsedAmount < 1 || !!fundingLoading}
+                  disabled={selfInvestBlocked || !isConnected || !parsedAmount || parsedAmount > remainingCapacity || parsedAmount < 1 || !!fundingLoading}
                   onClick={handleFund}
                 >
-                  {fundingLoading || (!isConnected ? "Connect Wallet First" : "Fund This Invoice")}
+                  {fundingLoading || (selfInvestBlocked ? "Funding Disabled" : (!isConnected ? "Connect Wallet First" : "Fund This Invoice"))}
                 </button>
 
                 {/* Fund via UPI (Razorpay) — no wallet needed */}
                 <button
                   className="btn btn-outline"
                   style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem", fontSize: "0.88rem", gap: "0.4rem" }}
-                  disabled={!!upiLoading}
+                  disabled={selfInvestBlocked || !!upiLoading}
                   onClick={handleFundViaUPI}
                 >
-                  {upiLoading || "💳 Fund via UPI / Card"}
+                  {upiLoading || (selfInvestBlocked ? "Funding Disabled" : "💳 Fund via UPI / Card")}
                 </button>
                 {isConnected && ethBalance !== null && (
                   <p style={{ fontSize: "0.74rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.4rem", fontFamily: "var(--font-body)" }}>

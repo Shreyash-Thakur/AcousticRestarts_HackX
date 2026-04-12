@@ -6,6 +6,7 @@ import RoleSelector from "./components/RoleSelector";
 import LandingPage from "./pages/LandingPage";
 import UploadPage from "./pages/UploadPage";
 import MarketplacePage from "./pages/MarketplacePage";
+import SecondaryMarketPage from "./pages/SecondaryMarketPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import SMEDashboard from "./pages/SMEDashboard";
 import InvestorDashboard from "./pages/InvestorDashboard";
@@ -48,6 +49,7 @@ function AppContent() {
       <Routes>
         <Route path="/"                   element={<LandingPage />} />
         <Route path="/marketplace"        element={<MarketplacePage />} />
+        <Route path="/secondary-market"   element={<SecondaryMarketPage />} />
         <Route path="/invoice/:id"        element={<InvoiceDetailPage />} />
         {/* SME-only routes — redirect investors away */}
         <Route path="/upload"             element={userRole === "investor" ? <Navigate to="/dashboard/investor" replace /> : <UploadPage />} />

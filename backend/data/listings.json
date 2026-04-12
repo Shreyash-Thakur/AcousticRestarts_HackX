@@ -1,1 +1,15 @@
-[]
+[
+  {
+    "id": 1,
+    "tokenId": "3",
+    "sellerWallet": "0x3be825A01c4805af186Bb265fea187aF3593e27D",
+    "amount": 1,
+    "askingPrice": 1,
+    "discount": 0,
+    "status": "sold",
+    "createdAt": "2026-04-12T02:44:00.700Z",
+    "buyerWallet": "0xd61102537042bbC46EBc761f5830540Cd5b476EF",
+    "soldAt": "2026-04-12T02:44:53.785Z",
+    "txHash": "0x08930318610f67b002a739ffa24ce2b50ea66b8034ae0b0d8112e05cef0b1fda"
+  }
+]

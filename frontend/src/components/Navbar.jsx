@@ -37,6 +37,7 @@ const CloseIcon = () => (
 
 const allNavLinks = [
   { to: "/marketplace", label: "Marketplace", roles: ["sme", "investor", null] },
+  { to: "/secondary-market", label: "Secondary Market", roles: ["investor", null] },
   { to: "/upload", label: "Upload Invoice", roles: ["sme", null] },
   { to: "/dashboard/sme", label: "SME Dashboard", roles: ["sme", null] },
   { to: "/dashboard/investor", label: "Portfolio", roles: ["investor", null] },
