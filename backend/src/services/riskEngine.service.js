@@ -33,16 +33,13 @@ const registryAbi = [
 export const computeRiskProof = async (clientName, opts = {}) => {
   const threshold = opts.threshold ?? 60;
 
-  // Step 1: Get sub-scores from risk model (currently deterministic / mock ML)
+  // Step 1: Get sub-scores from risk model (history-based)
   const insights = getRiskInsights(clientName);
 
-  // Use sub-scores that the circuit expects
-  let paymentReliability = insights.reliability.paymentReliability;
-  let invoiceLegitimacy = insights.riskScore; // reuse overall as legitimacy proxy
-  let businessProfile = Math.min(
-    100,
-    Math.max(0, 100 - insights.reliability.avgDelayDays * 2)
-  );
+  // Use real sub-scores from history-based model
+  let paymentReliability = insights.subScores?.paymentReliability ?? insights.reliability.paymentReliability;
+  let invoiceLegitimacy  = insights.subScores?.invoiceLegitimacy  ?? insights.riskScore;
+  let businessProfile    = insights.subScores?.businessProfile    ?? Math.min(100, Math.max(0, 100 - insights.reliability.avgDelayDays * 2));
 
   // Ensure sub-scores average to an integer (circuit constraint: rawScore * 3 === sum)
   const sum = paymentReliability + invoiceLegitimacy + businessProfile;

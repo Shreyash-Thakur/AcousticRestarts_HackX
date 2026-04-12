@@ -224,9 +224,9 @@ export default function UploadPage() {
         setRiskData({
           overall: res.riskScore,
           subScores: {
-            "Payment Reliability": res.reliability?.paymentReliability ?? 80,
-            "Invoice Legitimacy":  Math.min(100, res.riskScore + 3),
-            "Business Profile":    Math.max(0,   res.riskScore - 5),
+            "Payment Reliability": res.subScores?.paymentReliability ?? res.reliability?.paymentReliability ?? 80,
+            "Invoice Legitimacy":  res.subScores?.invoiceLegitimacy  ?? 80,
+            "Business Profile":    res.subScores?.businessProfile    ?? 80,
           },
         });
       }
@@ -622,7 +622,7 @@ export default function UploadPage() {
                   created?.invoiceNumber && ["Invoice Number", created.invoiceNumber],
                   ["Client",        created?.clientName || "—"],
                   created?.tokenId  && ["Token ID (On-Chain)", `#${created.tokenId}`],
-                  ["Risk Score",    `${created?.riskScore ?? "—"} (${created?.riskLevel ?? ""})`],
+                  created?.riskScore != null && ["Risk Score", `${created.riskScore} / 100 — ${created.riskLevel ?? ""}`],
                   ["Status",        created?.onChainMinted ? "Minted on Base Sepolia" : "Live on Marketplace"],
                 ].filter(Boolean).map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.88rem" }}>

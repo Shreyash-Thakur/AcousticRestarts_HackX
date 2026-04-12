@@ -126,6 +126,17 @@ export async function fetchInvestorPortfolio(wallet) {
   return res.json();
 }
 
+/**
+ * Fetch the history-based risk score for a client company.
+ * @param {string} clientName
+ * @returns {Promise<{ rawScore, riskLevel, subScores, returnRate, invoiceCount, insufficientHistory }>}
+ */
+export async function fetchRiskScore(clientName) {
+  const res = await fetch(`${API_BASE}/risk-score/${encodeURIComponent(clientName)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 /* ── Secondary Market Listings ── */
 
 export async function createListing({ tokenId, sellerWallet, amount, askingPrice, escrowTxHash }) {

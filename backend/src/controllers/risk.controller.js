@@ -1,4 +1,5 @@
 import { computeRiskProof, submitProofOnChain } from "../services/riskEngine.service.js";
+import { getRiskInsights } from "../services/risk.service.js";
 
 /**
  * POST /api/risk-proof
@@ -63,7 +64,7 @@ export async function submitRiskProof(req, res) {
 
 /**
  * GET /api/risk-score/:clientName
- * Quick endpoint — returns risk score without full ZK proof generation.
+ * Returns the history-based risk score for a client — no ZK proof overhead.
  */
 export async function getRiskScore(req, res) {
   try {
@@ -73,14 +74,16 @@ export async function getRiskScore(req, res) {
       return res.status(400).json({ message: "clientName param is required" });
     }
 
-    const result = await computeRiskProof(clientName, { threshold: 0 });
+    const insights = getRiskInsights(decodeURIComponent(clientName));
 
     return res.json({
-      clientName,
-      rawScore: result.rawScore,
-      riskLevel: result.riskLevel,
-      subScores: result.subScores,
-      zkAvailable: result.zkAvailable,
+      clientName: decodeURIComponent(clientName),
+      rawScore: insights.riskScore,
+      riskLevel: insights.riskLevel,
+      subScores: insights.subScores,
+      returnRate: insights.returnRate,
+      invoiceCount: insights.invoiceCount,
+      insufficientHistory: insights.insufficientHistory,
     });
   } catch (error) {
     console.error("getRiskScore error:", error);

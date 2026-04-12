@@ -19,6 +19,7 @@ import {
 } from "../services/blockchain.service.js";
 import { computeRiskProof } from "../services/riskEngine.service.js";
 import { verifyIRN } from "../services/gst.service.js";
+import { recomputeRiskForClient } from "../services/risk.service.js";
 
 const isValidDate = (value) => !Number.isNaN(Date.parse(value));
 
@@ -94,6 +95,7 @@ export const createInvoice = async (req, res) => {
     }
 
     const id = getNextInvoiceId();
+    // Persist invoice first so risk recompute can see it
     addInvoice({
       id,
       businessName,
@@ -107,6 +109,9 @@ export const createInvoice = async (req, res) => {
       smeName: smeName || null,
       createdAt: new Date().toISOString(),
     });
+
+    // Recompute risk score now that this client has a new invoice
+    recomputeRiskForClient(clientName);
 
     // Try to mint on-chain (non-blocking for response)
     let chainResult = { success: false };
@@ -129,24 +134,6 @@ export const createInvoice = async (req, res) => {
       console.error("On-chain minting failed (non-fatal):", err.message);
     }
 
-    // Run ZK risk scoring (non-blocking for response)
-    let riskResult = null;
-    try {
-      riskResult = await computeRiskProof(clientName);
-    } catch (err) {
-      console.error("Risk scoring failed (non-fatal):", err.message);
-    }
-
-    // Run GST IRN verification if we have an IRN (non-blocking)
-    let gstResult = null;
-    if (chainResult.irn) {
-      try {
-        gstResult = await verifyIRN(chainResult.irn);
-      } catch (err) {
-        console.error("GST verification failed (non-fatal):", err.message);
-      }
-    }
-
     const fullInvoice = await getFullInvoice(id);
 
     return res.status(201).json({
@@ -156,16 +143,6 @@ export const createInvoice = async (req, res) => {
       fundingTxHash: chainResult.fundingTxHash || null,
       irn: chainResult.irn || null,
       onChainMinted: chainResult.success,
-      riskScore: riskResult ? {
-        rawScore: riskResult.rawScore,
-        riskLevel: riskResult.riskLevel,
-        subScores: riskResult.subScores,
-        zkAvailable: riskResult.zkAvailable,
-      } : null,
-      gstVerification: gstResult ? {
-        valid: gstResult.valid,
-        data: gstResult.data,
-      } : null,
     });
   } catch (error) {
     console.error("createInvoice error:", error);
