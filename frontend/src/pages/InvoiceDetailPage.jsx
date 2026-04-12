@@ -1,10 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { invoices as mockInvoices } from "../data/mockData";
-import { fetchInvoices, createListing, fetchListings, buyListingApi, cancelListingApi, createPaymentOrder, verifyPayment, openRazorpayCheckout } from "../lib/api";
+import { fetchInvoices, createListing, fetchListings, buyListingApi, cancelListingApi, createPaymentOrder, verifyPayment, openRazorpayCheckout, openFundingForToken as openFundingForTokenApi, fundInvoiceDirect as fundInvoiceDirectApi, fetchInvoiceChainState, syncInvestorPosition as syncInvestorPositionApi } from "../lib/api";
 import { useWeb3 } from "../context/Web3Context";
-import { getFundingPool, getFundingPoolRead, formatTokenValue, parseTokenValue, txUrl, ADDRESSES, FUNDING_POOL_DEPLOY_BLOCK, getReadProvider } from "../lib/contracts";
+import { getFundingPool, getFundingPoolRead, formatTokenValue, parseTokenValue, txUrl } from "../lib/contracts";
 import { TrustScoreRing, SubScoreBar } from "../components/TrustScoreRing";
 import PageBackground from "../components/PageBackground";
 import RevealOnScroll from "../components/RevealOnScroll";
@@ -56,6 +55,16 @@ export default function InvoiceDetailPage() {
   const [funded, setFunded] = useState(false);
   const [fundingTx, setFundingTx] = useState("");
   const [fundingLoading, setFundingLoading] = useState("");
+  const ensureFundingIsOpen = async () => {
+    if (!tokenId) return false;
+    try {
+      const fi = await getFundingPoolRead().getFundingInfo(tokenId);
+      const target = formatTokenValue(fi.targetAmount);
+      return target > 0;
+    } catch {
+      return false;
+    }
+  };
 
   // Secondary market state
   const [listForSale, setListForSale] = useState(false);
@@ -65,96 +74,82 @@ export default function InvoiceDetailPage() {
   const [otherListings, setOtherListings] = useState([]); // listings by others
   const [buyingId, setBuyingId] = useState(null);
 
-  const mockMatch = mockInvoices.find((inv) => inv.id === id);
-
-  // Fetch invoice from API if not in mock data
+  // Fetch invoice from API
   useEffect(() => {
-    if (!mockMatch) {
-      setLoading(true);
-      fetchInvoices()
-        .then((data) => {
-          const arr = Array.isArray(data) ? data : [];
-          const found = arr.find((inv) => String(inv.tokenId || inv.id) === id);
-          if (found) {
-            setLiveInvoice({
-              id: String(found.tokenId || found.id),
-              business: found.businessName || found.business || "",
-              invoiceNumber: found.irn || `INV-${String(found.id).padStart(3, "0")}`,
-              clientName: found.clientName || "",
-              amount: Number(found.amount) || 0,
-              fundedAmount: Number(found.fundedAmount) || 0,
-              fundedPercent: found.amount > 0 ? Math.round((Number(found.fundedAmount) / Number(found.amount)) * 100) : 0,
-              trustScore: found.riskScore ?? 75,
-              riskLevel: found.riskLevel || "Medium",
-              yield: found.returnRate || 10,
-              daysRemaining: found.dueDate ? Math.max(0, Math.ceil((new Date(found.dueDate) - Date.now()) / 86400000)) : 30,
-              dueDate: found.dueDate ? new Date(found.dueDate).toLocaleDateString("en-CA") : "",
-              issuedDate: found.createdAt ? new Date(found.createdAt).toLocaleDateString("en-CA") : new Date().toLocaleDateString("en-CA"),
-              status: "funding",
-              description: `Invoice from ${found.businessName || "SME"} to ${found.clientName || "client"}`,
-              subScores: { paymentReliability: (found.riskScore ?? 75) + 4, invoiceLegitimacy: (found.riskScore ?? 75) + 1, businessProfile: (found.riskScore ?? 75) - 5 },
-              funders: [],
-              insuranceAvailable: true,
-              tokenId: found.tokenId || null,
-              mintTxHash: found.mintTxHash || null,
-              smeWallet: found.smeWallet || null,
-            });
-          }
-        })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    }
-  }, [id, mockMatch]);
+    setLoading(true);
+    setLiveInvoice(null);
+    fetchInvoices()
+      .then((data) => {
+        const arr = Array.isArray(data) ? data : [];
+        const found = arr.find((inv) => String(inv.tokenId || inv.id) === id);
+        if (found) {
+          setLiveInvoice({
+            id: String(found.tokenId || found.id),
+            business: found.businessName || found.business || "",
+            invoiceNumber: found.irn || `INV-${String(found.id).padStart(3, "0")}`,
+            clientName: found.clientName || "",
+            amount: Number(found.amount) || 0,
+            fundedAmount: Number(found.fundedAmount) || 0,
+            fundedPercent: found.amount > 0 ? Math.round((Number(found.fundedAmount) / Number(found.amount)) * 100) : 0,
+            trustScore: found.riskScore ?? 75,
+            riskLevel: found.riskLevel || "Medium",
+            yield: found.returnRate || 10,
+            daysRemaining: found.dueDate ? Math.max(0, Math.ceil((new Date(found.dueDate) - Date.now()) / 86400000)) : 30,
+            dueDate: found.dueDate ? new Date(found.dueDate).toLocaleDateString("en-CA") : "",
+            issuedDate: found.createdAt ? new Date(found.createdAt).toLocaleDateString("en-CA") : new Date().toLocaleDateString("en-CA"),
+            status: "funding",
+            description: `Invoice from ${found.businessName || "SME"} to ${found.clientName || "client"}`,
+            subScores: { paymentReliability: (found.riskScore ?? 75) + 4, invoiceLegitimacy: (found.riskScore ?? 75) + 1, businessProfile: (found.riskScore ?? 75) - 5 },
+            funders: [],
+            insuranceAvailable: true,
+            tokenId: found.tokenId || null,
+            mintTxHash: found.mintTxHash || null,
+            smeWallet: found.smeWallet || null,
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [id]);
 
-  const invoice = mockMatch || liveInvoice;
-  const tokenId = liveInvoice?.tokenId || (mockMatch ? null : null);
+  const invoice = liveInvoice;
+  const tokenId = liveInvoice?.tokenId || null;
 
   const [funders, setFunders] = useState([]);
 
-  // Fetch on-chain funding info + funders from InvestmentMade events
-  useEffect(() => {
+  const refreshChainState = async () => {
     if (!tokenId) return;
-    const pool = getFundingPoolRead();
-    pool.getFundingInfo(tokenId)
-      .then((fi) => setChainFunding({
-        targetAmount: formatTokenValue(fi.targetAmount),
-        fundedAmount: formatTokenValue(fi.fundedAmount),
-        fullyFunded: fi.fullyFunded,
-        settled: fi.settled,
-      }))
-      .catch((e) => console.error("getFundingInfo error:", e));
-
-    // Query InvestmentMade events with bounded block range (RPC limits to 10k blocks)
-    (async () => {
-      try {
-        const provider = getReadProvider();
-        const latest = await provider.getBlockNumber();
-        // Scan from deploy block to latest, in 10k-block chunks
-        const fromBlock = FUNDING_POOL_DEPLOY_BLOCK;
-        const allEvents = [];
-        for (let start = fromBlock; start <= latest; start += 10000) {
-          const end = Math.min(start + 9999, latest);
-          const chunk = await pool.queryFilter(pool.filters.InvestmentMade(), start, end);
-          allEvents.push(...chunk);
-        }
-        console.log("[Funders] Total InvestmentMade events:", allEvents.length);
-        const map = {};
-        for (const ev of allEvents) {
-          const evTokenId = String(ev.args[0]);
-          const addr = ev.args[1];
-          const amt = ev.args[2];
-          if (evTokenId === String(tokenId)) {
-            map[addr] = (map[addr] || 0) + formatTokenValue(amt);
-          }
-        }
-        const list = Object.entries(map).map(([address, amount]) => ({ address, amount }));
-        console.log("[Funders] Funders for tokenId", tokenId, ":", list);
-        setFunders(list);
-      } catch (e) {
-        console.error("[Funders] queryFilter error:", e);
+    try {
+      const snapshot = await fetchInvoiceChainState(tokenId, account);
+      const target = Number(snapshot?.targetAmount) || 0;
+      if (target > 0) {
+        setChainFunding({
+          targetAmount: target,
+          fundedAmount: Number(snapshot?.fundedAmount) || 0,
+          fullyFunded: Boolean(snapshot?.fullyFunded),
+          settled: Boolean(snapshot?.settled),
+        });
+      } else {
+        setChainFunding(null);
       }
-    })();
-  }, [tokenId]);
+      setFunders(Array.isArray(snapshot?.funders) ? snapshot.funders : []);
+      if (Number.isFinite(snapshot?.myPosition)) {
+        setMyPosition(Number(snapshot.myPosition));
+      }
+    } catch (e) {
+      console.error("refreshChainState error:", e);
+    }
+  };
+
+  // Fetch unified chain state from backend.
+  useEffect(() => {
+    refreshChainState();
+    if (!tokenId) return;
+    const intervalId = setInterval(() => {
+      refreshChainState();
+    }, 5000);
+    return () => clearInterval(intervalId);
+  }, [tokenId, account]);
 
   useEffect(() => {
     if (!account) return;
@@ -163,10 +158,6 @@ export default function InvoiceDetailPage() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       provider.getBalance(account).then((b) => setEthBalance(Number(ethers.formatEther(b)))).catch(() => {});
     });
-    if (tokenId) {
-      const pool = getFundingPoolRead();
-      pool.getInvestment(account, tokenId).then((a) => setMyPosition(formatTokenValue(a))).catch(() => {});
-    }
   }, [account, tokenId]);
 
   // Fetch secondary market listings for this token
@@ -189,8 +180,9 @@ export default function InvoiceDetailPage() {
   useEffect(() => { refreshListings(); }, [tokenId, account]);
 
   // Overwrite fundedAmount/fundedPercent from chain if available
-  const realFundedAmount = chainFunding?.fundedAmount ?? invoice?.fundedAmount ?? 0;
-  const realAmount = chainFunding?.targetAmount ?? invoice?.amount ?? 0;
+  const hasOpenedChainFunding = Boolean(chainFunding && chainFunding.targetAmount > 0);
+  const realFundedAmount = hasOpenedChainFunding ? chainFunding.fundedAmount : (invoice?.fundedAmount ?? 0);
+  const realAmount = hasOpenedChainFunding ? chainFunding.targetAmount : (invoice?.amount ?? 0);
   const realFundedPercent = realAmount > 0 ? Math.round((realFundedAmount / realAmount) * 100) : 0;
 
   /* ── Fund on-chain ── */
@@ -198,6 +190,45 @@ export default function InvoiceDetailPage() {
     if (!isConnected) { connectWallet(); return; }
     if (!isCorrectChain) { alert("Please switch to Base Sepolia network."); return; }
     if (!tokenId) { alert("This invoice is not yet minted on-chain."); return; }
+
+    try {
+      const net = await signer?.provider?.getNetwork?.();
+      if (Number(net?.chainId) !== 84532) {
+        alert("Wallet is not on Base Sepolia. Please switch network and try again.");
+        return;
+      }
+    } catch {
+      alert("Unable to verify wallet network. Please reconnect your wallet.");
+      return;
+    }
+
+    let isOpen = await ensureFundingIsOpen();
+    if (!isOpen) {
+      setFundingLoading("Opening funding pool…");
+      try {
+        const openResult = await openFundingForTokenApi(tokenId);
+        if (openResult?.success) {
+          isOpen = true;
+        }
+      } catch (err) {
+        setFundingLoading("");
+        alert(err?.message || "Failed to open funding pool on backend.");
+      }
+      if (!isOpen) {
+        isOpen = await ensureFundingIsOpen();
+      }
+      if (!isOpen) {
+        alert("Funding pool is not open for this invoice yet. Please wait a moment and try again.");
+        return;
+      }
+      const fi = await getFundingPoolRead().getFundingInfo(tokenId);
+      setChainFunding({
+        targetAmount: formatTokenValue(fi.targetAmount),
+        fundedAmount: formatTokenValue(fi.fundedAmount),
+        fullyFunded: fi.fullyFunded,
+        settled: fi.settled,
+      });
+    }
 
     const parsedAmt = parseFloat(investAmount.replace(/,/g, "")) || 0;
     if (parsedAmt <= 0) return;
@@ -212,48 +243,106 @@ export default function InvoiceDetailPage() {
       const investTx = await pool.invest(tokenId, { value: amountWei });
       const receipt = await investTx.wait();
 
+      try {
+        await syncInvestorPositionApi(tokenId, {
+          investorWallet: account,
+          deltaAmount: parsedAmt,
+          txHash: receipt.hash,
+        });
+      } catch (syncErr) {
+        console.warn("syncInvestorPosition failed:", syncErr?.message || syncErr);
+      }
+
       setFundingTx(receipt.hash);
       setFunded(true);
       setFundingLoading("");
 
+      window.dispatchEvent(new CustomEvent("investment-updated", {
+        detail: { tokenId, account, txHash: receipt.hash },
+      }));
+
       // Refresh on-chain data
       try {
-        const fi = await getFundingPoolRead().getFundingInfo(tokenId);
-        setChainFunding({
-          targetAmount: formatTokenValue(fi.targetAmount),
-          fundedAmount: formatTokenValue(fi.fundedAmount),
-          fullyFunded: fi.fullyFunded,
-          settled: fi.settled,
-        });
-        setMyPosition(prev => prev + parsedAmt);
+        await refreshChainState();
         // Refresh ETH balance
         import("ethers").then(({ ethers }) => {
           const provider = new ethers.BrowserProvider(window.ethereum);
           provider.getBalance(account).then((b) => setEthBalance(Number(ethers.formatEther(b)))).catch(() => {});
         });
-        // Refresh funders list from events (bounded range)
-        const poolRead = getFundingPoolRead();
-        const provider = getReadProvider();
-        const latest = await provider.getBlockNumber();
-        const allEvs = [];
-        for (let s = FUNDING_POOL_DEPLOY_BLOCK; s <= latest; s += 10000) {
-          const e = Math.min(s + 9999, latest);
-          const chunk = await poolRead.queryFilter(poolRead.filters.InvestmentMade(), s, e);
-          allEvs.push(...chunk);
-        }
-        const map = {};
-        for (const ev of allEvs) {
-          if (String(ev.args[0]) === String(tokenId)) {
-            const addr = ev.args[1];
-            map[addr] = (map[addr] || 0) + formatTokenValue(ev.args[2]);
-          }
-        }
-        setFunders(Object.entries(map).map(([address, amount]) => ({ address, amount })));
       } catch { /* ignore */ }
     } catch (err) {
+      const reasonText = String(err?.reason || err?.shortMessage || err?.message || "").toLowerCase();
+      const isNotOpen = reasonText.includes("not open");
+
+      // If funding wasn't open at tx time, open it via backend and retry once.
+      if (isNotOpen) {
+        try {
+          setFundingLoading("Opening funding pool…");
+          await openFundingForTokenApi(tokenId);
+
+          setFundingLoading("Retrying investment…");
+          const pool = getFundingPool(signer);
+          const amountWei = parseTokenValue(parsedAmt);
+          const retryTx = await pool.invest(tokenId, { value: amountWei });
+          const retryReceipt = await retryTx.wait();
+
+          try {
+            await syncInvestorPositionApi(tokenId, {
+              investorWallet: account,
+              deltaAmount: parsedAmt,
+              txHash: retryReceipt.hash,
+            });
+          } catch (syncErr) {
+            console.warn("syncInvestorPosition retry failed:", syncErr?.message || syncErr);
+          }
+
+          setFundingTx(retryReceipt.hash);
+          setFunded(true);
+          await refreshChainState();
+          setFundingLoading("");
+          window.dispatchEvent(new CustomEvent("investment-updated", {
+            detail: { tokenId, account, txHash: retryReceipt.hash },
+          }));
+          return;
+        } catch (retryErr) {
+          // Final fallback: execute funding through backend relayer path.
+          try {
+            setFundingLoading("Finalizing via backend…");
+            const fallback = await fundInvoiceDirectApi(tokenId, {
+              amountUsd: parsedAmt,
+              investorWallet: account,
+            });
+
+            const optimisticTarget = Number(invoice?.amount) || 0;
+            const optimisticFunded = Math.min(optimisticTarget, (Number(realFundedAmount) || 0) + parsedAmt);
+            setChainFunding({
+              targetAmount: optimisticTarget,
+              fundedAmount: optimisticFunded,
+              fullyFunded: optimisticTarget > 0 && optimisticFunded >= optimisticTarget,
+              settled: false,
+            });
+
+            setFundingTx(fallback?.investTxHash || "");
+            setFunded(true);
+            await refreshChainState();
+            setFundingLoading("");
+            window.dispatchEvent(new CustomEvent("investment-updated", {
+              detail: { tokenId, account, txHash: fallback?.investTxHash || null },
+            }));
+            return;
+          } catch (fallbackErr) {
+            console.error("Funding retry failed:", retryErr);
+            console.error("Backend fallback failed:", fallbackErr);
+            setFundingLoading("");
+            alert(fallbackErr?.message || retryErr?.reason || retryErr?.shortMessage || retryErr?.message || "Transaction failed after retries");
+            return;
+          }
+        }
+      }
+
       console.error("Funding failed:", err);
       setFundingLoading("");
-      alert(err?.reason || err?.message || "Transaction failed");
+      alert(err?.reason || err?.shortMessage || err?.message || "Transaction failed");
     }
   };
 
@@ -265,8 +354,47 @@ export default function InvoiceDetailPage() {
 
   const handleFundViaUPI = async () => {
     if (!tokenId) { alert("Invoice not minted on-chain yet."); return; }
+
+    let isOpen = await ensureFundingIsOpen();
+    if (!isOpen) {
+      setUpiLoading("Opening funding pool…");
+      try {
+        const openResult = await openFundingForTokenApi(tokenId);
+        if (openResult?.success) {
+          isOpen = true;
+        }
+      } catch (err) {
+        setUpiLoading("");
+        alert(err?.message || "Failed to open funding pool on backend.");
+      }
+      if (!isOpen) {
+        isOpen = await ensureFundingIsOpen();
+      }
+      if (!isOpen) {
+        alert("Funding pool is not open for this invoice yet. Please wait a moment and try again.");
+        return;
+      }
+      const fi = await getFundingPoolRead().getFundingInfo(tokenId);
+      setChainFunding({
+        targetAmount: formatTokenValue(fi.targetAmount),
+        fundedAmount: formatTokenValue(fi.fundedAmount),
+        fullyFunded: fi.fullyFunded,
+        settled: fi.settled,
+      });
+    }
     const parsedAmt = parseFloat(investAmount.replace(/,/g, "")) || 0;
-    if (parsedAmt <= 0) return;
+    if (parsedAmt < 1) {
+      alert("Please enter an investment amount of at least $1.");
+      return;
+    }
+    if (remainingCapacity <= 0) {
+      alert("This invoice is fully funded. No remaining capacity is available.");
+      return;
+    }
+    if (parsedAmt > remainingCapacity) {
+      alert(`You can invest up to $${remainingCapacity.toLocaleString()} on this invoice.`);
+      return;
+    }
 
     // Convert USD → INR (rough rate for demo)
     const INR_PER_USD = 83;
@@ -292,6 +420,10 @@ export default function InvoiceDetailPage() {
       setUpiSuccess(true);
       setUpiLoading("");
       setFunded(true);
+      await refreshChainState();
+      window.dispatchEvent(new CustomEvent("investment-updated", {
+        detail: { tokenId, account, txHash: null },
+      }));
     } catch (err) {
       console.error("UPI funding failed:", err);
       setUpiLoading("");
@@ -439,9 +571,20 @@ export default function InvoiceDetailPage() {
           trustScore, riskLevel, yield: yld, daysRemaining, status, description, subScores, insuranceAvailable } = invoice;
 
   const remaining = realAmount - realFundedAmount;
+  const remainingCapacity = Math.max(0, remaining);
+  const isFullyFundedOnChain = Boolean(chainFunding?.fullyFunded) || remainingCapacity <= 0;
+  const isSettledOnChain = Boolean(chainFunding?.settled);
+  const effectiveStatus = isSettledOnChain
+    ? "settled"
+    : (isFullyFundedOnChain ? "funded" : status);
   const parsedAmount = parseFloat(investAmount.replace(/,/g, "")) || 0;
   const projectedReturn = parsedAmount * (yld / 100) * (daysRemaining / 365);
   const insurancePremium = insurance ? parsedAmount * 0.015 : 0;
+  const fundingLabel =
+    realFundedPercent > 0 && realFundedPercent < 1
+      ? `${realFundedPercent.toFixed(2)}%`
+      : `${Math.round(realFundedPercent)}%`;
+  const fundingProgressWidth = Math.max(0, Math.min(100, realFundedPercent > 0 && realFundedPercent < 1 ? 1 : realFundedPercent));
 
   return (
     <PageBackground className="page" style={{ background: "var(--bg)" }}>
@@ -470,7 +613,7 @@ export default function InvoiceDetailPage() {
                   <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", fontFamily: "var(--font-body)" }}>Client: {clientName}</p>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.4rem" }}>
-                  <span className={`badge badge-${status}`}>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
+                  <span className={`badge badge-${effectiveStatus}`}>{effectiveStatus.charAt(0).toUpperCase() + effectiveStatus.slice(1)}</span>
                   <span className={riskClass(riskLevel)}>{riskLevel} Risk</span>
                 </div>
               </div>
@@ -523,14 +666,14 @@ export default function InvoiceDetailPage() {
             <div className="card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
                 <span style={{ fontWeight: 700, fontFamily: "var(--font-head)", color: "var(--text)" }}>Funding Progress</span>
-                <span style={{ fontFamily: "var(--font-head)", fontSize: "1.2rem", color: "#15803D", fontWeight: 700 }}>{realFundedPercent}%</span>
+                <span style={{ fontFamily: "var(--font-head)", fontSize: "1.2rem", color: "#15803D", fontWeight: 700 }}>{fundingLabel}</span>
               </div>
               <div className="progress-bar" style={{ height: 10, marginBottom: "1rem" }}>
-                <div className="progress-fill" style={{ width: `${realFundedPercent}%` }} />
+                <div className="progress-fill" style={{ width: `${fundingProgressWidth}%` }} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", fontFamily: "var(--font-body)" }}>
                 <span style={{ color: "var(--text-muted)" }}>Raised: <strong style={{ color: "var(--text)" }}>${realFundedAmount.toLocaleString()}</strong></span>
-                <span style={{ color: "var(--text-muted)" }}>Remaining: <strong style={{ color: "var(--text)" }}>${Math.max(0, remaining).toLocaleString()}</strong></span>
+                <span style={{ color: "var(--text-muted)" }}>Remaining: <strong style={{ color: "var(--text)" }}>${remainingCapacity.toLocaleString()}</strong></span>
                 <span style={{ color: "var(--text-muted)" }}>Target: <strong style={{ color: "var(--text)" }}>${realAmount.toLocaleString()}</strong></span>
               </div>
               {chainFunding && (
@@ -586,7 +729,7 @@ export default function InvoiceDetailPage() {
           <div style={{ position: "sticky", top: "calc(var(--nav-h) + 1.5rem)", display: "flex", flexDirection: "column", gap: "1.1rem" }}>
 
             {/* Investment form */}
-            {status === "funding" && !funded && (
+            {effectiveStatus === "funding" && !funded && !isFullyFundedOnChain && !isSettledOnChain && (
               <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className="card">
                 <h3 style={{ fontWeight: 700, marginBottom: "1.25rem", fontSize: "1.05rem", fontFamily: "var(--font-head)", color: "var(--text)" }}>
                   Fund This Invoice
@@ -597,14 +740,14 @@ export default function InvoiceDetailPage() {
                   <input
                     className="input"
                     type="number"
-                    placeholder={`Up to $${remaining.toLocaleString()}`}
+                    placeholder={`Up to $${remainingCapacity.toLocaleString()}`}
                     value={investAmount}
                     onChange={(e) => setInvestAmount(e.target.value)}
                     min={100}
-                    max={remaining}
+                    max={remainingCapacity}
                   />
                   <div style={{ display: "flex", gap: "0.35rem", marginTop: "0.45rem", flexWrap: "wrap" }}>
-                    {[500, 2000, 5000, 10000].filter(v => v <= remaining).map((v) => (
+                    {[500, 2000, 5000, 10000].filter(v => v <= remainingCapacity).map((v) => (
                       <button
                         key={v}
                         className="chip"
@@ -677,7 +820,7 @@ export default function InvoiceDetailPage() {
                 <button
                   className="btn btn-gold"
                   style={{ width: "100%", justifyContent: "center" }}
-                  disabled={!isConnected || !parsedAmount || parsedAmount > remaining || parsedAmount < 1 || !!fundingLoading}
+                  disabled={!isConnected || !parsedAmount || parsedAmount > remainingCapacity || parsedAmount < 1 || !!fundingLoading}
                   onClick={handleFund}
                 >
                   {fundingLoading || (!isConnected ? "Connect Wallet First" : "Fund This Invoice")}
@@ -687,20 +830,44 @@ export default function InvoiceDetailPage() {
                 <button
                   className="btn btn-outline"
                   style={{ width: "100%", justifyContent: "center", marginTop: "0.5rem", fontSize: "0.88rem", gap: "0.4rem" }}
-                  disabled={!parsedAmount || parsedAmount > remaining || parsedAmount < 1 || !!upiLoading}
+                  disabled={!!upiLoading}
                   onClick={handleFundViaUPI}
                 >
                   {upiLoading || "💳 Fund via UPI / Card"}
                 </button>
                 {isConnected && ethBalance !== null && (
                   <p style={{ fontSize: "0.74rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.4rem", fontFamily: "var(--font-body)" }}>
-                    Your ETH balance: <strong>{ethBalance.toFixed(4)} ETH</strong>
+                    Your ETH balance: <strong>{ethBalance.toFixed(8)} ETH</strong>
                   </p>
                 )}
                 <p style={{ fontSize: "0.74rem", color: "var(--text-dim)", textAlign: "center", marginTop: "0.6rem", display: "flex", alignItems: "center", gap: "0.3rem", justifyContent: "center", fontFamily: "var(--font-body)" }}>
                   <InfoIcon /> Funds held in escrow until invoice settles
                 </p>
+                <p style={{ fontSize: "0.7rem", color: "#78716C", textAlign: "center", marginTop: "0.35rem", fontFamily: "var(--font-body)" }}>
+                  Testnet note: current contract funding uses micro-ETH sized units, so wallet balance changes can look very small.
+                </p>
               </motion.div>
+            )}
+            {tokenId && !hasOpenedChainFunding && !isSettledOnChain && !funded && (
+              <div className="card" style={{ borderColor: "rgba(180,83,9,0.2)", background: "#FFFBEB" }}>
+                <h3 style={{ fontWeight: 700, marginBottom: "0.4rem", fontSize: "0.95rem", fontFamily: "var(--font-head)", color: "#92400E" }}>
+                  Funding Not Open Yet
+                </h3>
+                <p style={{ fontSize: "0.82rem", color: "#92400E", fontFamily: "var(--font-body)" }}>
+                  This invoice is minted, but funding has not been opened on-chain yet. Please retry shortly.
+                </p>
+              </div>
+            )}
+
+            {isFullyFundedOnChain && !isSettledOnChain && (
+              <div className="card" style={{ borderColor: "rgba(29,78,216,0.2)", background: "#EFF6FF" }}>
+                <h3 style={{ fontWeight: 700, marginBottom: "0.4rem", fontSize: "0.95rem", fontFamily: "var(--font-head)", color: "#1D4ED8" }}>
+                  Funding Closed
+                </h3>
+                <p style={{ fontSize: "0.82rem", color: "#1E3A8A", fontFamily: "var(--font-body)" }}>
+                  This invoice is already fully funded on-chain. New investments (ETH or UPI/Card) are disabled.
+                </p>
+              </div>
             )}
 
             {/* Funded success */}

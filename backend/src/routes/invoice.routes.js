@@ -5,6 +5,11 @@ import {
   listInvoices,
   getInvoice,
   getStats,
+  openFundingForToken,
+  fundInvoiceDirect,
+  getInvoiceChainState,
+  getInvestorPortfolio,
+  syncInvestorPosition,
 } from "../controllers/invoice.controller.js";
 import { parseInvoiceFile } from "../controllers/parse.controller.js";
 
@@ -30,6 +35,11 @@ router.post("/invoice", createInvoice);
 router.get("/invoices", listInvoices);
 router.get("/invoice/:id", getInvoice);
 router.get("/stats", getStats);
+router.post("/invoice/token/:tokenId/open-funding", openFundingForToken);
+router.post("/invoice/token/:tokenId/fund-direct", fundInvoiceDirect);
+router.post("/invoice/token/:tokenId/sync-position", syncInvestorPosition);
+router.get("/invoice/token/:tokenId/chain-state", getInvoiceChainState);
+router.get("/portfolio/:wallet", getInvestorPortfolio);
 
 // Backward-compatible aliases
 router.post("/invoices", createInvoice);

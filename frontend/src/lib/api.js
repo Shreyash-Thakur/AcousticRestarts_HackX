@@ -68,6 +68,62 @@ export async function fetchStats() {
   return res.json();
 }
 
+export async function openFundingForToken(tokenId) {
+  const res = await fetch(`${API_BASE}/invoice/token/${tokenId}/open-funding`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || err.reason || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fundInvoiceDirect(tokenId, { amountUsd, investorWallet }) {
+  const res = await fetch(`${API_BASE}/invoice/token/${tokenId}/fund-direct`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amountUsd, investorWallet }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || err.reason || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function syncInvestorPosition(tokenId, { investorWallet, deltaAmount, txHash }) {
+  const res = await fetch(`${API_BASE}/invoice/token/${tokenId}/sync-position`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ investorWallet, deltaAmount, txHash }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || err.reason || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchInvoiceChainState(tokenId, account) {
+  const q = account ? `?account=${encodeURIComponent(account)}` : "";
+  const res = await fetch(`${API_BASE}/invoice/token/${tokenId}/chain-state${q}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || err.reason || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchInvestorPortfolio(wallet) {
+  const res = await fetch(`${API_BASE}/portfolio/${wallet}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: "Request failed" }));
+    throw new Error(err.message || err.reason || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 /* ── Secondary Market Listings ── */
 
 export async function createListing({ tokenId, sellerWallet, amount, askingPrice }) {

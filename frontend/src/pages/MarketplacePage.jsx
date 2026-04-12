@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { invoices as mockInvoices } from "../data/mockData";
 import { fetchInvoices } from "../lib/api";
 import { getFundingPoolRead, formatTokenValue } from "../lib/contracts";
 import InvoiceCard from "../components/InvoiceCard";
@@ -45,11 +44,52 @@ export default function MarketplacePage() {
   const [liveInvoices, setLiveInvoices] = useState([]);
 
   useEffect(() => {
-    fetchInvoices()
-      .then(async (data) => {
+    let cancelled = false;
+
+    const loadInvoices = async () => {
+      try {
+        const data = await fetchInvoices();
         const arr = Array.isArray(data) ? data : [];
+        const makeKey = (inv) => {
+          const invoiceRef = String(inv.invoiceNumber || inv.irn || "").trim().toLowerCase();
+          if (!invoiceRef) return `id:${String(inv.tokenId || inv.id)}`;
+          return [
+            invoiceRef,
+            String(inv.businessName || inv.business || "").trim().toLowerCase(),
+            String(inv.clientName || "").trim().toLowerCase(),
+            String(Number(inv.amount) || 0),
+            String(inv.dueDate || ""),
+          ].join("|");
+        };
+
+        const dedupedMap = new Map();
+        for (const inv of arr) {
+          const key = makeKey(inv);
+          const prev = dedupedMap.get(key);
+          if (!prev) {
+            dedupedMap.set(key, inv);
+            continue;
+          }
+
+          // Prefer minted records, then newer records.
+          const prevScore = (prev.tokenId ? 10 : 0) + (prev.mintTxHash ? 5 : 0);
+          const curScore = (inv.tokenId ? 10 : 0) + (inv.mintTxHash ? 5 : 0);
+          if (curScore > prevScore) {
+            dedupedMap.set(key, inv);
+            continue;
+          }
+          if (curScore === prevScore) {
+            const prevCreated = new Date(prev.createdAt || 0).getTime();
+            const curCreated = new Date(inv.createdAt || 0).getTime();
+            if (curCreated > prevCreated) {
+              dedupedMap.set(key, inv);
+            }
+          }
+        }
+
+        const deduped = [...dedupedMap.values()];
         const pool = getFundingPoolRead();
-        const normalized = await Promise.all(arr.map(async (inv) => {
+        const normalized = await Promise.all(deduped.map(async (inv) => {
           // Try to read on-chain funding progress
           let fundedAmount = Number(inv.fundedAmount) || 0;
           let fundedPercent = 0;
@@ -58,11 +98,11 @@ export default function MarketplacePage() {
               const fi = await pool.getFundingInfo(inv.tokenId);
               fundedAmount = formatTokenValue(fi.fundedAmount);
               const target = formatTokenValue(fi.targetAmount);
-              fundedPercent = target > 0 ? Math.round((fundedAmount / target) * 100) : 0;
+              fundedPercent = target > 0 ? Number(((fundedAmount / target) * 100).toFixed(2)) : 0;
             } catch { /* funding not opened */ }
           }
           if (!fundedPercent && inv.amount > 0) {
-            fundedPercent = Math.round((fundedAmount / Number(inv.amount)) * 100);
+            fundedPercent = Number(((fundedAmount / Number(inv.amount)) * 100).toFixed(2));
           }
           return {
             id: String(inv.tokenId || inv.id),
@@ -83,14 +123,29 @@ export default function MarketplacePage() {
             _source: "live",
           };
         }));
-        setLiveInvoices(normalized);
-      })
-      .catch(() => {});
+        if (!cancelled) {
+          setLiveInvoices(normalized);
+        }
+      } catch {
+        // ignore transient fetch failures
+      }
+    };
+
+    loadInvoices();
+    const intervalId = setInterval(loadInvoices, 8000);
+    const onInvestmentUpdate = () => {
+      loadInvoices();
+    };
+    window.addEventListener("investment-updated", onInvestmentUpdate);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      window.removeEventListener("investment-updated", onInvestmentUpdate);
+    };
   }, []);
 
-  const invoices = liveInvoices.length > 0
-    ? [...liveInvoices, ...mockInvoices]
-    : mockInvoices;
+  const invoices = liveInvoices;
 
   const filtered = useMemo(() => {
     let list = invoices.filter((inv) => {

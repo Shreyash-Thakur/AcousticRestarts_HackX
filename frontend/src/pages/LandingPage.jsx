@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useWeb3 } from "../context/Web3Context";
-import { platformStats as fallbackStats } from "../data/mockData";
 import { fetchStats } from "../lib/api";
 import Footer from "../components/Footer";
 import RevealOnScroll from "../components/RevealOnScroll";
@@ -200,7 +199,12 @@ function HeroDotGrid({ mousePosRef }) {
 export default function LandingPage() {
   const navigate = useNavigate();
   const { userRole } = useWeb3();
-  const [stats, setStats] = useState(fallbackStats);
+  const [stats, setStats] = useState({
+    totalFunded: "$0",
+    activeInvoices: "0",
+    avgYield: "0%",
+    avgTrustScore: "0",
+  });
 
   useEffect(() => {
     fetchStats()

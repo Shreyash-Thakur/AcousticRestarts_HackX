@@ -120,12 +120,24 @@ export function Web3Provider({ children }) {
         const eip1193Provider = await targetWallet.getEthereumProvider();
         const ethProvider = new ethers.BrowserProvider(eip1193Provider);
         const s = await ethProvider.getSigner();
+        const net = await ethProvider.getNetwork();
 
         setAccount(targetWallet.address);
         setProvider(ethProvider);
         setSigner(s);
-        setChainId(BASE_SEPOLIA_CHAIN_ID);
+        setChainId(Number(net.chainId));
         setWalletSource(loginType === "external" ? "metamask" : "privy");
+
+        // Keep chainId in sync when user changes network from wallet UI.
+        if (typeof eip1193Provider?.on === "function") {
+          eip1193Provider.on("chainChanged", (hexChainId) => {
+            try {
+              setChainId(parseInt(hexChainId, 16));
+            } catch {
+              // ignore malformed chain id events
+            }
+          });
+        }
       } catch (err) {
         console.error("Wallet setup failed:", err);
       }

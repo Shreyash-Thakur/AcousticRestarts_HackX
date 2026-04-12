@@ -1,4 +1,6 @@
 import { ethers } from "ethers";
+import { getAllInvoices } from "../../data/invoices.js";
+import { getInvestmentsByToken, getInvestmentsByWallet, setInvestmentPosition } from "../../data/investments.js";
 
 const RPC_URL =
   process.env.BASE_SEPOLIA_RPC_URL ||
@@ -28,13 +30,17 @@ const invoTokenAbi = [
 ];
 const fundingPoolAbi = [
   "function openFunding(uint256 tokenId) external",
-  "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled, bool defaulted))",
+  "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled))",
   "function getInvestment(address, uint256) view returns (uint256)",
   "function settleInvoice(uint256 tokenId) external payable",
   "function invest(uint256 tokenId) external payable",
   "function transferInvestment(uint256 tokenId, address to, uint256 amount) external",
   "function platformBackstop(uint256 tokenId) external payable",
+  "event InvestmentMade(uint256 indexed tokenId, address indexed investor, uint256 amount)",
+  "event PositionTransferred(uint256 indexed tokenId, address indexed from, address indexed to, uint256 amount)",
 ];
+
+const FUNDING_POOL_DEPLOY_BLOCK = Number(process.env.FUNDING_POOL_DEPLOY_BLOCK) || 40060000;
 
 /* ── Provider + Contracts ── */
 const provider = RPC_URL ? new ethers.JsonRpcProvider(RPC_URL) : null;
@@ -110,6 +116,320 @@ export const getChainInvoice = async (invoiceId, amount) => {
   }
 };
 export const getInvoiceOnChain = getChainInvoice;
+
+/* ── Ensure funding is opened for a token ── */
+export const ensureFundingOpenOnChain = async (tokenId) => {
+  if (!blockchainEnabled || !fundingPoolWrite || !fundingPoolRead || !wallet) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+
+  const parsedTokenId = Number(tokenId);
+  if (!Number.isFinite(parsedTokenId) || parsedTokenId < 1) {
+    return { success: false, reason: "invalid_token_id" };
+  }
+
+  try {
+    // If already open, return fast.
+    const current = await fundingPoolRead.getFundingInfo(parsedTokenId);
+    const currentTarget = Number(ethers.formatUnits(current.targetAmount, 6));
+    if (currentTarget > 0) {
+      return {
+        success: true,
+        openedNow: false,
+        alreadyOpen: true,
+        targetAmount: currentTarget,
+      };
+    }
+
+    // Open now via admin/deployer wallet.
+    const data = fundingPoolWrite.interface.encodeFunctionData("openFunding", [parsedTokenId]);
+    const tx = await wallet.sendTransaction({
+      to: FUNDING_POOL_ADDRESS,
+      data,
+      gasLimit: 500000n,
+    });
+    const receipt = await tx.wait();
+
+    // Verify it really opened.
+    const updated = await fundingPoolRead.getFundingInfo(parsedTokenId);
+    const updatedTarget = Number(ethers.formatUnits(updated.targetAmount, 6));
+    if (updatedTarget <= 0) {
+      return {
+        success: false,
+        reason: "open_funding_verification_failed",
+        txHash: receipt.hash,
+      };
+    }
+
+    return {
+      success: true,
+      openedNow: true,
+      alreadyOpen: false,
+      txHash: receipt.hash,
+      targetAmount: updatedTarget,
+    };
+  } catch (err) {
+    return { success: false, reason: err.message || "open_funding_failed" };
+  }
+};
+
+/* ── Server-side direct funding fallback (no contract changes) ── */
+export const fundInvoiceFromBackend = async ({ tokenId, amountUsd, investorWallet }) => {
+  if (!blockchainEnabled || !fundingPoolWrite || !fundingPoolRead || !wallet) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+
+  const parsedTokenId = Number(tokenId);
+  const parsedAmount = Number(amountUsd);
+  if (!Number.isFinite(parsedTokenId) || parsedTokenId < 1) {
+    return { success: false, reason: "invalid_token_id" };
+  }
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    return { success: false, reason: "invalid_amount" };
+  }
+
+  try {
+    const openResult = await ensureFundingOpenOnChain(parsedTokenId);
+    if (!openResult.success) {
+      return { success: false, reason: openResult.reason || "open_funding_failed" };
+    }
+
+    const backendAddr = await wallet.getAddress();
+    const before = await fundingPoolRead.getInvestment(backendAddr, parsedTokenId);
+
+    const amountWei = ethers.parseUnits(String(parsedAmount), 6);
+    const investTx = await fundingPoolWrite.invest(parsedTokenId, {
+      value: amountWei,
+      gasLimit: 500000n,
+    });
+    const investReceipt = await investTx.wait();
+
+    const after = await fundingPoolRead.getInvestment(backendAddr, parsedTokenId);
+    const delta = after - before;
+
+    let transferTxHash = null;
+    if (
+      investorWallet &&
+      ethers.isAddress(investorWallet) &&
+      investorWallet.toLowerCase() !== backendAddr.toLowerCase() &&
+      delta > 0n
+    ) {
+      const transferTx = await fundingPoolWrite.transferInvestment(
+        parsedTokenId,
+        investorWallet,
+        delta,
+        { gasLimit: 300000n }
+      );
+      const transferReceipt = await transferTx.wait();
+      transferTxHash = transferReceipt.hash;
+
+      // Persist investor's updated on-chain position for fast UI reflection.
+      const investorPosition = await fundingPoolRead.getInvestment(investorWallet, parsedTokenId);
+      setInvestmentPosition({
+        tokenId: parsedTokenId,
+        investorWallet,
+        amount: Number(ethers.formatUnits(investorPosition, 6)),
+        txHash: transferTxHash,
+      });
+    } else if (delta > 0n) {
+      // Investment remains with backend wallet.
+      const backendPosition = await fundingPoolRead.getInvestment(backendAddr, parsedTokenId);
+      setInvestmentPosition({
+        tokenId: parsedTokenId,
+        investorWallet: backendAddr,
+        amount: Number(ethers.formatUnits(backendPosition, 6)),
+        txHash: investReceipt.hash,
+      });
+    }
+
+    return {
+      success: true,
+      investTxHash: investReceipt.hash,
+      transferTxHash,
+      fundedAmount: Number(ethers.formatUnits(delta, 6)),
+    };
+  } catch (err) {
+    return { success: false, reason: err.message || "fund_invoice_failed" };
+  }
+};
+
+export const getFundingSnapshotOnChain = async ({ tokenId, account }) => {
+  if (!blockchainEnabled || !fundingPoolRead) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+
+  const parsedTokenId = Number(tokenId);
+  if (!Number.isFinite(parsedTokenId) || parsedTokenId < 1) {
+    return { success: false, reason: "invalid_token_id" };
+  }
+
+  try {
+    const fi = await fundingPoolRead.getFundingInfo(parsedTokenId);
+
+    const ledgerRows = getInvestmentsByToken(parsedTokenId);
+    const funders = ledgerRows
+      .filter((r) => Number(r.amount) > 0)
+      .map((r) => ({ address: String(r.investorWallet).toLowerCase(), amount: Number(r.amount) }));
+
+    let myPosition = 0;
+    if (account && ethers.isAddress(account)) {
+      try {
+        const invested = await fundingPoolRead.getInvestment(account, parsedTokenId);
+        myPosition = Number(ethers.formatUnits(invested, 6));
+        if (myPosition <= 0) {
+          const fallback = ledgerRows.find(
+            (r) => String(r.investorWallet || "").toLowerCase() === String(account).toLowerCase()
+          );
+          myPosition = Number(fallback?.amount || 0);
+        }
+      } catch {
+        const fallback = ledgerRows.find(
+          (r) => String(r.investorWallet || "").toLowerCase() === String(account).toLowerCase()
+        );
+        myPosition = Number(fallback?.amount || 0);
+      }
+
+      if (myPosition > 0) {
+        const idx = funders.findIndex((f) => f.address === String(account).toLowerCase());
+        if (idx >= 0) {
+          funders[idx].amount = Math.max(Number(funders[idx].amount || 0), myPosition);
+        } else {
+          funders.push({ address: String(account).toLowerCase(), amount: myPosition });
+        }
+      }
+    }
+
+    funders.sort((a, b) => b.amount - a.amount);
+
+    return {
+      success: true,
+      tokenId: parsedTokenId,
+      targetAmount: Number(ethers.formatUnits(fi.targetAmount, 6)),
+      fundedAmount: Number(ethers.formatUnits(fi.fundedAmount, 6)),
+      fullyFunded: Boolean(fi.fullyFunded),
+      settled: Boolean(fi.settled),
+      fundingDeadline: Number(fi.fundingDeadline),
+      funders,
+      myPosition,
+    };
+  } catch (err) {
+    return { success: false, reason: err.message || "snapshot_failed" };
+  }
+};
+
+export const getInvestorPortfolioOnChain = async (walletAddress) => {
+  if (!blockchainEnabled || !fundingPoolRead || !invoTokenRead) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+  if (!walletAddress || !ethers.isAddress(walletAddress)) {
+    return { success: false, reason: "invalid_wallet" };
+  }
+
+  try {
+    const invoiceTokenIds = getAllInvoices()
+      .map((r) => Number(r.tokenId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const ledgerTokenIds = getInvestmentsByWallet(walletAddress)
+      .map((r) => Number(r.tokenId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    const tokenIds = [...new Set([...invoiceTokenIds, ...ledgerTokenIds])];
+    const positions = [];
+
+    for (const tokenId of tokenIds) {
+      try {
+        const ledgerRow = getInvestmentsByWallet(walletAddress).find((r) => Number(r.tokenId) === tokenId);
+        let investedAmount = Number(ledgerRow?.amount || 0);
+        try {
+          const invested = await fundingPoolRead.getInvestment(walletAddress, tokenId);
+          const chainAmount = Number(ethers.formatUnits(invested, 6));
+          investedAmount = Math.max(investedAmount, chainAmount);
+        } catch {
+          // Keep ledger fallback value.
+        }
+        if (investedAmount <= 0) continue;
+
+        const fi = await fundingPoolRead.getFundingInfo(tokenId);
+        const inv = await invoTokenRead.getInvoice(tokenId);
+        const dueDateUnix = Number(inv[3]) || 0;
+        const daysToMaturity = Math.max(0, Math.ceil((dueDateUnix * 1000 - Date.now()) / 86400000));
+        const yld = 10;
+
+        positions.push({
+          id: `chain-${tokenId}`,
+          tokenId,
+          business: `Invoice #${tokenId}`,
+          invoiceNumber: `INV-${String(tokenId).padStart(3, "0")}`,
+          investedAmount,
+          expectedReturn: investedAmount * (yld / 100) * (daysToMaturity / 365),
+          yield: yld,
+          trustScore: 75,
+          riskLevel: "Medium",
+          daysToMaturity,
+          status: fi.settled ? "settled" : "funding",
+          targetAmount: Number(ethers.formatUnits(fi.targetAmount, 6)),
+          fundedAmount: Number(ethers.formatUnits(fi.fundedAmount, 6)),
+          _source: "chain",
+        });
+      } catch {
+        // ignore per-token read errors
+      }
+    }
+
+    return { success: true, positions };
+  } catch (err) {
+    return { success: false, reason: err.message || "portfolio_failed", positions: [] };
+  }
+};
+
+export const syncInvestmentPosition = async ({ tokenId, investorWallet, deltaAmount = 0, txHash = null }) => {
+  try {
+    if (!investorWallet || !ethers.isAddress(investorWallet)) {
+      return { success: false, error: "Invalid investor wallet" };
+    }
+
+    const parsedTokenId = Number(tokenId);
+    if (!Number.isFinite(parsedTokenId) || parsedTokenId <= 0) {
+      return { success: false, error: "Invalid token id" };
+    }
+
+    const numericDelta = Number(deltaAmount) || 0;
+    let amount = 0;
+    let source = "ledger";
+
+    try {
+      const invested = await fundingPoolRead.getInvestment(investorWallet, parsedTokenId);
+      amount = Number(ethers.formatUnits(invested, 6));
+      source = "chain";
+
+      if (amount <= 0 && numericDelta > 0) {
+        const existing = getInvestmentsByWallet(investorWallet).find((r) => Number(r.tokenId) === parsedTokenId);
+        amount = Number(existing?.amount || 0) + numericDelta;
+        source = "chain+delta";
+      }
+    } catch {
+      const existing = getInvestmentsByWallet(investorWallet).find((r) => Number(r.tokenId) === parsedTokenId);
+      amount = Number(existing?.amount || 0) + numericDelta;
+    }
+
+    const record = setInvestmentPosition({
+      tokenId: parsedTokenId,
+      investorWallet,
+      amount,
+      txHash,
+    });
+
+    return {
+      success: true,
+      tokenId: parsedTokenId,
+      investorWallet: String(investorWallet).toLowerCase(),
+      amount,
+      source,
+      record,
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
 
 /* ── Mint invoice on-chain + open funding ── */
 export const mintAndOpenFunding = async ({ smeWallet, invoiceId, amount, dueDate }) => {
@@ -247,6 +567,14 @@ export const investOnBehalf = async (tokenId, investorWallet, amountINR) => {
         const transferTx = await fundingPoolWrite.transferInvestment(tokenId, investorWallet, amountWei, { gasLimit: 300000n });
         const transferReceipt = await transferTx.wait();
         transferTxHash = transferReceipt.hash;
+
+        const investorPosition = await fundingPoolRead.getInvestment(investorWallet, tokenId);
+        setInvestmentPosition({
+          tokenId,
+          investorWallet,
+          amount: Number(ethers.formatUnits(investorPosition, 6)),
+          txHash: transferTxHash,
+        });
       } catch (err) {
         console.error("transferInvestment failed (non-fatal):", err.message);
       }
@@ -307,7 +635,6 @@ export const getExpiredUnfundedTokens = async () => {
         if (
           fi.targetAmount > 0n &&
           !fi.fullyFunded &&
-          !fi.defaulted &&
           Number(fi.fundingDeadline) > 0 &&
           now >= Number(fi.fundingDeadline)
         ) {

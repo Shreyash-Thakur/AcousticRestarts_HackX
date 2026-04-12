@@ -8,11 +8,60 @@ import {
   getAllFullInvoices,
   getFullInvoice,
 } from "../services/invoice-orchestration.service.js";
-import { mintAndOpenFunding, getChainStats } from "../services/blockchain.service.js";
+import {
+  mintAndOpenFunding,
+  getChainStats,
+  ensureFundingOpenOnChain,
+  fundInvoiceFromBackend,
+  getFundingSnapshotOnChain,
+  getInvestorPortfolioOnChain,
+  syncInvestmentPosition,
+} from "../services/blockchain.service.js";
 import { computeRiskProof } from "../services/riskEngine.service.js";
 import { verifyIRN } from "../services/gst.service.js";
 
 const isValidDate = (value) => !Number.isNaN(Date.parse(value));
+
+const dedupeInvoices = (rows) => {
+  const byKey = new Map();
+
+  const makeKey = (inv) => {
+    const invoiceRef = String(inv.invoiceNumber || inv.irn || "").trim().toLowerCase();
+    if (!invoiceRef) return `id:${String(inv.id)}`;
+    return [
+      invoiceRef,
+      String(inv.businessName || "").trim().toLowerCase(),
+      String(inv.clientName || "").trim().toLowerCase(),
+      String(Number(inv.amount) || 0),
+      String(inv.dueDate || ""),
+    ].join("|");
+  };
+
+  for (const inv of rows) {
+    const key = makeKey(inv);
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, inv);
+      continue;
+    }
+
+    const prevScore = (prev.tokenId ? 10 : 0) + (prev.mintTxHash ? 5 : 0);
+    const curScore = (inv.tokenId ? 10 : 0) + (inv.mintTxHash ? 5 : 0);
+    if (curScore > prevScore) {
+      byKey.set(key, inv);
+      continue;
+    }
+    if (curScore === prevScore) {
+      const prevCreated = new Date(prev.createdAt || 0).getTime();
+      const curCreated = new Date(inv.createdAt || 0).getTime();
+      if (curCreated > prevCreated) {
+        byKey.set(key, inv);
+      }
+    }
+  }
+
+  return [...byKey.values()];
+};
 
 export const createInvoice = async (req, res) => {
   try {
@@ -136,10 +185,12 @@ export const listInvoices = async (_req, res) => {
         tokenId: stored?.tokenId || null,
         mintTxHash: stored?.mintTxHash || null,
         irn: stored?.irn || null,
+        invoiceNumber: stored?.invoiceNumber || null,
         smeWallet: stored?.smeWallet || null,
+        createdAt: stored?.createdAt || inv.createdAt || null,
       };
     });
-    return res.json(enriched);
+    return res.json(dedupeInvoices(enriched));
   } catch (error) {
     return res.status(500).json({ message: "Failed to fetch invoices" });
   }
@@ -193,5 +244,108 @@ export const getStats = async (_req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Failed to fetch stats" });
+  }
+};
+
+export const openFundingForToken = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const result = await ensureFundingOpenOnChain(tokenId);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Failed to open funding for token",
+        ...result,
+      });
+    }
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("openFundingForToken error:", error);
+    return res.status(500).json({ message: "Failed to open funding" });
+  }
+};
+
+export const fundInvoiceDirect = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const { amountUsd, investorWallet } = req.body || {};
+
+    const result = await fundInvoiceFromBackend({
+      tokenId,
+      amountUsd,
+      investorWallet,
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Direct funding failed",
+        ...result,
+      });
+    }
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("fundInvoiceDirect error:", error);
+    return res.status(500).json({ message: "Failed to fund invoice directly" });
+  }
+};
+
+export const getInvoiceChainState = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const { account } = req.query;
+
+    const snapshot = await getFundingSnapshotOnChain({ tokenId, account });
+    if (!snapshot.success) {
+      return res.status(400).json({
+        message: "Failed to fetch invoice chain state",
+        ...snapshot,
+      });
+    }
+
+    return res.status(200).json(snapshot);
+  } catch (error) {
+    console.error("getInvoiceChainState error:", error);
+    return res.status(500).json({ message: "Failed to fetch invoice chain state" });
+  }
+};
+
+export const getInvestorPortfolio = async (req, res) => {
+  try {
+    const { wallet } = req.params;
+    const result = await getInvestorPortfolioOnChain(wallet);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Failed to fetch investor portfolio",
+        ...result,
+      });
+    }
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("getInvestorPortfolio error:", error);
+    return res.status(500).json({ message: "Failed to fetch investor portfolio" });
+  }
+};
+
+export const syncInvestorPosition = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const { investorWallet, deltaAmount, txHash } = req.body || {};
+
+    const result = await syncInvestmentPosition({ tokenId, investorWallet, deltaAmount, txHash });
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Failed to sync investor position",
+        ...result,
+      });
+    }
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("syncInvestorPosition error:", error);
+    return res.status(500).json({ message: "Failed to sync investor position" });
   }
 };

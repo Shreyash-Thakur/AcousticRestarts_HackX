@@ -29,6 +29,18 @@ const SpinnerIcon = () => (
     <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
   </svg>
 );
+const RotatingSpinner = ({ size = 28 }) => (
+  <motion.span
+    aria-hidden="true"
+    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+    animate={{ rotate: 360 }}
+    transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+  >
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+    </svg>
+  </motion.span>
+);
 const EditIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -322,9 +334,8 @@ export default function UploadPage() {
                 display: "flex", alignItems: "center", justifyContent: "center",
                 margin: "0 auto 1.5rem",
                 color: "#15803D",
-                animation: "spin 1.2s linear infinite",
               }}>
-                <SpinnerIcon />
+                <RotatingSpinner size={28} />
               </div>
               <h2 style={{ fontSize: "1.4rem", marginBottom: "0.5rem", fontFamily: "var(--font-head)" }}>Parsing invoice…</h2>
               <p style={{ color: "var(--text-muted)", marginBottom: "0.5rem", fontSize: "0.9rem", fontFamily: "var(--font-body)" }}>
@@ -354,7 +365,6 @@ export default function UploadPage() {
               <p style={{ fontSize: "0.82rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>
                 {Math.round(progress)}% complete
               </p>
-              <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
             </motion.div>
           )}
 
@@ -493,7 +503,7 @@ export default function UploadPage() {
                     onClick={handleDraftToken}
                     disabled={submitting}
                   >
-                    {submitting ? <><SpinnerIcon /> Submitting…</> : <><CubeIcon /> Draft Token on Chain</>}
+                      {submitting ? <><RotatingSpinner size={18} /> Submitting…</> : <><CubeIcon /> Draft Token on Chain</>}
                   </button>
                   {submitError && (
                     <p style={{ color: "#B91C1C", fontSize: "0.85rem", marginTop: "0.75rem", fontFamily: "var(--font-body)" }}>

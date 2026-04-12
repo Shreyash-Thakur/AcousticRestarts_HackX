@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { smeInvoices as fallbackInvoices } from "../data/mockData";
 import { fetchInvoices } from "../lib/api";
 import { useWeb3 } from "../context/Web3Context";
 import { txUrl, tokenUrl } from "../lib/contracts";
@@ -95,10 +94,8 @@ export default function SMEDashboard() {
     ? liveInvoices.filter((inv) => inv.smeWallet && inv.smeWallet.toLowerCase() === account.toLowerCase())
     : liveInvoices;
 
-  // Show only own invoices when logged in as SME; fallback to mock for demo
-  const smeInvoices = isConnected
-    ? (myLiveInvoices.length > 0 ? myLiveInvoices : [])
-    : fallbackInvoices;
+  // Show only own invoices when connected; otherwise show live invoices.
+  const smeInvoices = isConnected ? myLiveInvoices : liveInvoices;
 
   // Dynamic metrics from real data
   const metrics = useMemo(() => {

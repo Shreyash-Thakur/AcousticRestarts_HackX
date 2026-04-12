@@ -17,6 +17,12 @@ const ArrowRightIcon = () => (
 export default function InvoiceCard({ invoice }) {
   const navigate = useNavigate();
   const { id, business, amount, fundedPercent, trustScore, riskLevel, yield: yld, daysRemaining, clientName } = invoice;
+  const numericFundedPercent = Number(fundedPercent) || 0;
+  const fundedLabel =
+    numericFundedPercent > 0 && numericFundedPercent < 1
+      ? `${numericFundedPercent.toFixed(2)}% funded`
+      : `${Math.round(numericFundedPercent)}% funded`;
+  const progressWidth = Math.max(0, Math.min(100, numericFundedPercent > 0 && numericFundedPercent < 1 ? 1 : numericFundedPercent));
 
   return (
     <div
@@ -56,14 +62,14 @@ export default function InvoiceCard({ invoice }) {
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
           <span style={{ fontSize: "0.76rem", color: "var(--text-dim)", fontFamily: "var(--font-body)" }}>
-            {fundedPercent}% funded
+            {fundedLabel}
           </span>
           <span style={{ fontSize: "0.76rem", color: "var(--gold)", fontWeight: 600, fontFamily: "var(--font-body)" }}>
             {yld}% yield
           </span>
         </div>
         <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${fundedPercent}%` }} />
+          <div className="progress-fill" style={{ width: `${progressWidth}%` }} />
         </div>
       </div>
 
