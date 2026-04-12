@@ -28,17 +28,18 @@ const makeInvoices = (count, overrides = {}) =>
 
 describe("computeClientRiskScore", () => {
 
-  it("returns score 100 for 0 invoices (no history)", () => {
+  it("returns score 50 / Medium for 0 invoices (no history)", () => {
     const result = computeClientRiskScore([]);
-    assert.equal(result.rawScore, 100);
-    assert.equal(result.riskLevel, "Low");
+    assert.equal(result.rawScore, 50);
+    assert.equal(result.riskLevel, "Medium");
     assert.equal(result.insufficientHistory, true);
     assert.equal(result.invoiceCount, 0);
   });
 
-  it("returns score 100 for exactly 3 invoices (at threshold)", () => {
+  it("returns score 50 / Medium for exactly 3 invoices (at threshold)", () => {
     const result = computeClientRiskScore(makeInvoices(3));
-    assert.equal(result.rawScore, 100);
+    assert.equal(result.rawScore, 50);
+    assert.equal(result.riskLevel, "Medium");
     assert.equal(result.insufficientHistory, true);
     assert.equal(result.invoiceCount, 3);
   });
@@ -106,17 +107,18 @@ describe("computeClientRiskScore", () => {
     }
   });
 
-  it("score stays 100 for 1, 2, and 3 invoices (boundary check)", () => {
+  it("score stays 50 / Medium for 1, 2, and 3 invoices (boundary check)", () => {
     for (const count of [1, 2, 3]) {
       const result = computeClientRiskScore(makeInvoices(count));
-      assert.equal(result.rawScore, 100, `count=${count} should return 100`);
+      assert.equal(result.rawScore, 50, `count=${count} should return 50`);
+      assert.equal(result.riskLevel, "Medium", `count=${count} should be Medium`);
     }
   });
 
   it("score changes at exactly 4 invoices", () => {
     const at3 = computeClientRiskScore(makeInvoices(3));
     const at4 = computeClientRiskScore(makeInvoices(4));
-    assert.equal(at3.rawScore, 100);
+    assert.equal(at3.rawScore, 50);
     assert.equal(at3.insufficientHistory, true);
     assert.equal(at4.insufficientHistory, false);
     assert.ok(at4.rawScore >= 0 && at4.rawScore <= 100);

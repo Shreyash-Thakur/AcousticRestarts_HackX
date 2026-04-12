@@ -1,7 +1,12 @@
 [
-  { "companyName": "Reliance Retail Ltd",        "gst": "14BTBIW1440B2Z1" },
-  { "companyName": "Tata Consultancy Services",  "gst": "31IJHXZ7367O1ZW" },
-  { "companyName": "Infosys Limited",            "gst": "19SOGIC3453A3ZJ" },
-  { "companyName": "Aditya Birla Finance",       "gst": "15YULJZ3576Y2ZD" },
-  { "companyName": "Mahindra Logistics",         "gst": "17NENAA8524E4ZD" }
+  { "companyName": "GlobalMart Inc",        "gst": "17TLRXL9693T3Z7" },
+  { "companyName": "Silverline Retail Corp","gst": "27UXAUW6258N9ZT" },
+  { "companyName": "NextGen Logistics",     "gst": "34SKUDG7632G1ZL" },
+  { "companyName": "PrimeScale Industries", "gst": "13MRHFN9424J5ZM" },
+  { "companyName": "UrbanGrid Solutions",   "gst": "27UXAUW6258N9ZT" }, 
+  { "companyName": "FinEdge Capital",       "gst": "22TQNVI3623D2ZO" },
+  { "companyName": "CloudAxis Ltd",         "gst": "10YTCIN7522G9ZF" },
+  { "companyName": "MetroBuild Infra",      "gst": "21FUKTY8063O5ZI" },
+  { "companyName": "NovaRetail Group",      "gst": "24APDKK7694G7Z9" },
+  { "companyName": "Apex Manufacturing Co", "gst": "35CCTDO2710E9ZE" }
 ]

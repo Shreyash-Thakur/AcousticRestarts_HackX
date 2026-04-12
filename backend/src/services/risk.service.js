@@ -24,9 +24,9 @@ export const computeClientRiskScore = (invoices) => {
 
   if (count <= HISTORY_THRESHOLD) {
     return {
-      rawScore: 100,
-      riskLevel: "Low",
-      subScores: { paymentReliability: 100, invoiceLegitimacy: 100, businessProfile: 100 },
+      rawScore: 50,
+      riskLevel: "Medium",
+      subScores: { paymentReliability: 50, invoiceLegitimacy: 50, businessProfile: 50 },
       invoiceCount: count,
       insufficientHistory: true,
     };
@@ -154,11 +154,11 @@ const buildInsightsFromScore = (scored) => {
 };
 
 const defaultInsights = () => ({
-  riskScore: 100,
-  riskLevel: "Low",
-  returnRate: 7.0,
-  subScores: { paymentReliability: 100, invoiceLegitimacy: 100, businessProfile: 100 },
+  riskScore: 50,
+  riskLevel: "Medium",
+  returnRate: parseFloat((18 - 50 * 0.11).toFixed(1)),
+  subScores: { paymentReliability: 50, invoiceLegitimacy: 50, businessProfile: 50 },
   invoiceCount: 0,
   insufficientHistory: true,
-  reliability: { paymentReliability: 100, avgDelayDays: 1, reliabilityLevel: "High" },
+  reliability: { paymentReliability: 50, avgDelayDays: 15, reliabilityLevel: "Medium" },
 });

@@ -19,8 +19,6 @@ import {
   getClaimsStatusOnChain,
   claimReturnsWithBackendWallet,
 } from "../services/blockchain.service.js";
-import { computeRiskProof } from "../services/riskEngine.service.js";
-import { verifyIRN } from "../services/gst.service.js";
 import { recomputeRiskForClient } from "../services/risk.service.js";
 
 const isValidDate = (value) => !Number.isNaN(Date.parse(value));
