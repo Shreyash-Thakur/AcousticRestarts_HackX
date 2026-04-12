@@ -16,6 +16,8 @@ import {
   getFundingSnapshotOnChain,
   getInvestorPortfolioOnChain,
   syncInvestmentPosition,
+  getClaimsStatusOnChain,
+  claimReturnsWithBackendWallet,
 } from "../services/blockchain.service.js";
 import { computeRiskProof } from "../services/riskEngine.service.js";
 import { verifyIRN } from "../services/gst.service.js";
@@ -365,5 +367,39 @@ export const syncInvestorPosition = async (req, res) => {
   } catch (error) {
     console.error("syncInvestorPosition error:", error);
     return res.status(500).json({ message: "Failed to sync investor position" });
+  }
+};
+
+export const getInvoiceClaimsStatus = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const result = await getClaimsStatusOnChain(tokenId);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Failed to fetch claims status",
+        ...result,
+      });
+    }
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("getInvoiceClaimsStatus error:", error);
+    return res.status(500).json({ message: "Failed to fetch claims status" });
+  }
+};
+
+export const claimInvoiceReturnsBackend = async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+    const result = await claimReturnsWithBackendWallet(tokenId);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Backend claim failed",
+        ...result,
+      });
+    }
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("claimInvoiceReturnsBackend error:", error);
+    return res.status(500).json({ message: "Failed to claim returns" });
   }
 };

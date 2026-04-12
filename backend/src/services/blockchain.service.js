@@ -32,11 +32,15 @@ const fundingPoolAbi = [
   "function openFunding(uint256 tokenId) external",
   "function getFundingInfo(uint256) view returns (tuple(uint256 tokenId, uint256 targetAmount, uint256 fundedAmount, uint256 fundingDeadline, bool fullyFunded, bool settled))",
   "function getInvestment(address, uint256) view returns (uint256)",
+  "function hasClaimed(address, uint256) view returns (bool)",
+  "function claimReturns(uint256 tokenId) external",
   "function settleInvoice(uint256 tokenId) external payable",
   "function invest(uint256 tokenId) external payable",
   "function transferInvestment(uint256 tokenId, address to, uint256 amount) external",
   "function platformBackstop(uint256 tokenId) external payable",
   "event InvestmentMade(uint256 indexed tokenId, address indexed investor, uint256 amount)",
+  "event InvoiceSettled(uint256 indexed tokenId, uint256 repaymentAmount)",
+  "event InvestorWithdrawal(uint256 indexed tokenId, address indexed investor, uint256 payout)",
   "event PositionTransferred(uint256 indexed tokenId, address indexed from, address indexed to, uint256 amount)",
 ];
 
@@ -375,6 +379,13 @@ export const getInvestorPortfolioOnChain = async (walletAddress) => {
         const dueDateUnix = Number(inv[3]) || 0;
         const daysToMaturity = Math.max(0, Math.ceil((dueDateUnix * 1000 - Date.now()) / 86400000));
         const yld = 10;
+        let claimed = false;
+        try {
+          claimed = await fundingPoolRead.hasClaimed(walletAddress, tokenId);
+        } catch {
+          claimed = false;
+        }
+        const claimable = Boolean(fi.settled) && !claimed;
 
         positions.push({
           id: `chain-${tokenId}`,
@@ -388,6 +399,8 @@ export const getInvestorPortfolioOnChain = async (walletAddress) => {
           riskLevel: "Medium",
           daysToMaturity,
           status: fi.settled ? "settled" : "funding",
+          claimed,
+          claimable,
           targetAmount: Number(ethers.formatUnits(fi.targetAmount, 6)),
           fundedAmount: Number(ethers.formatUnits(fi.fundedAmount, 6)),
           _source: "chain",
@@ -706,5 +719,131 @@ export const getExpiredUnfundedTokens = async () => {
     return expired;
   } catch {
     return [];
+  }
+};
+
+export const getSettlementAmountOnChain = async (tokenId) => {
+  if (!blockchainEnabled || !fundingPoolRead) return { success: false, reason: "blockchain_disabled" };
+
+  const parsedTokenId = Number(tokenId);
+  if (!Number.isFinite(parsedTokenId) || parsedTokenId < 1) {
+    return { success: false, reason: "invalid_token_id" };
+  }
+
+  try {
+    const filter = fundingPoolRead.filters.InvoiceSettled(parsedTokenId);
+    const events = await fundingPoolRead.queryFilter(filter, FUNDING_POOL_DEPLOY_BLOCK, "latest");
+    if (!events.length) return { success: true, amount: 0 };
+
+    const latest = events[events.length - 1];
+    const repaymentAmount = latest.args?.repaymentAmount ?? latest.args?.[1] ?? 0n;
+    return { success: true, amount: Number(ethers.formatUnits(repaymentAmount, 6)), txHash: latest.transactionHash };
+  } catch (err) {
+    return { success: false, reason: err.message || "settlement_query_failed" };
+  }
+};
+
+export const getClaimsStatusOnChain = async (tokenId) => {
+  if (!blockchainEnabled || !fundingPoolRead) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+
+  const parsedTokenId = Number(tokenId);
+  if (!Number.isFinite(parsedTokenId) || parsedTokenId < 1) {
+    return { success: false, reason: "invalid_token_id" };
+  }
+
+  try {
+    const fi = await fundingPoolRead.getFundingInfo(parsedTokenId);
+    const targetAmount = Number(ethers.formatUnits(fi.targetAmount, 6));
+    const settled = Boolean(fi.settled);
+
+    const settlement = await getSettlementAmountOnChain(parsedTokenId);
+    const settledAmount = settlement.success ? Number(settlement.amount || 0) : 0;
+
+    const ledgerRows = getInvestmentsByToken(parsedTokenId);
+    const addrSet = new Set(
+      ledgerRows
+        .map((r) => String(r.investorWallet || "").toLowerCase())
+        .filter(Boolean)
+    );
+
+    const backendAddr = getBackendWalletAddress();
+    if (backendAddr) addrSet.add(String(backendAddr).toLowerCase());
+
+    const investors = [];
+    for (const investor of addrSet) {
+      try {
+        const invested = await fundingPoolRead.getInvestment(investor, parsedTokenId);
+        const position = Number(ethers.formatUnits(invested, 6));
+        if (position <= 0) continue;
+
+        const claimed = await fundingPoolRead.hasClaimed(investor, parsedTokenId);
+        const claimable = settled && !claimed;
+        const estimatedPayout = claimable && targetAmount > 0
+          ? (settledAmount * position) / targetAmount
+          : 0;
+
+        investors.push({
+          investorWallet: investor,
+          position,
+          claimed: Boolean(claimed),
+          claimable,
+          estimatedPayout,
+          isBackendWallet: backendAddr ? investor === String(backendAddr).toLowerCase() : false,
+        });
+      } catch {
+        // skip malformed/unsupported addresses
+      }
+    }
+
+    return {
+      success: true,
+      tokenId: parsedTokenId,
+      settled,
+      targetAmount,
+      settledAmount,
+      investors,
+      backendWallet: backendAddr,
+    };
+  } catch (err) {
+    return { success: false, reason: err.message || "claims_status_failed" };
+  }
+};
+
+export const claimReturnsWithBackendWallet = async (tokenId) => {
+  if (!blockchainEnabled || !fundingPoolRead || !fundingPoolWrite || !wallet) {
+    return { success: false, reason: "blockchain_disabled" };
+  }
+
+  const parsedTokenId = Number(tokenId);
+  if (!Number.isFinite(parsedTokenId) || parsedTokenId < 1) {
+    return { success: false, reason: "invalid_token_id" };
+  }
+
+  try {
+    const backendAddr = String(wallet.address).toLowerCase();
+    const fi = await fundingPoolRead.getFundingInfo(parsedTokenId);
+    if (!fi.settled) return { success: false, reason: "invoice_not_settled" };
+
+    const invested = await fundingPoolRead.getInvestment(backendAddr, parsedTokenId);
+    const investedAmount = Number(ethers.formatUnits(invested, 6));
+    if (investedAmount <= 0) return { success: false, reason: "no_backend_position" };
+
+    const claimed = await fundingPoolRead.hasClaimed(backendAddr, parsedTokenId);
+    if (claimed) return { success: true, alreadyClaimed: true, backendWallet: backendAddr, tokenId: parsedTokenId };
+
+    const tx = await fundingPoolWrite.claimReturns(parsedTokenId, { gasLimit: 400000n });
+    const receipt = await tx.wait();
+
+    return {
+      success: true,
+      alreadyClaimed: false,
+      tokenId: parsedTokenId,
+      backendWallet: backendAddr,
+      txHash: receipt.hash,
+    };
+  } catch (err) {
+    return { success: false, reason: err.message || "backend_claim_failed" };
   }
 };

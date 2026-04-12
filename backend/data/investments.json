@@ -26,5 +26,12 @@
     "amount": 5,
     "lastTxHash": "0x4311f6f6d176bd6b7d6a10cca26e2ad0afd4944e1172a112b89c524e55bfc593",
     "updatedAt": "2026-04-12T03:03:10.464Z"
+  },
+  {
+    "tokenId": 9,
+    "investorWallet": "0xd61102537042bbc46ebc761f5830540cd5b476ef",
+    "amount": 2,
+    "lastTxHash": "0x592d28d66f9845b205a6a5169d5ae9e74dc65f651fd409f1e3ec7de9d7242a88",
+    "updatedAt": "2026-04-12T03:42:18.783Z"
   }
 ]

@@ -10,6 +10,8 @@ import {
   getInvoiceChainState,
   getInvestorPortfolio,
   syncInvestorPosition,
+  getInvoiceClaimsStatus,
+  claimInvoiceReturnsBackend,
 } from "../controllers/invoice.controller.js";
 import { parseInvoiceFile } from "../controllers/parse.controller.js";
 
@@ -39,6 +41,8 @@ router.post("/invoice/token/:tokenId/open-funding", openFundingForToken);
 router.post("/invoice/token/:tokenId/fund-direct", fundInvoiceDirect);
 router.post("/invoice/token/:tokenId/sync-position", syncInvestorPosition);
 router.get("/invoice/token/:tokenId/chain-state", getInvoiceChainState);
+router.get("/invoice/token/:tokenId/claims", getInvoiceClaimsStatus);
+router.post("/invoice/token/:tokenId/claim-backend", claimInvoiceReturnsBackend);
 router.get("/portfolio/:wallet", getInvestorPortfolio);
 
 // Backward-compatible aliases

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { TrustScoreRing } from "../components/TrustScoreRing";
 import { useWeb3 } from "../context/Web3Context";
-import { tokenUrl } from "../lib/contracts";
+import { getFundingPool, tokenUrl } from "../lib/contracts";
 import { fetchInvestorPortfolio } from "../lib/api";
 import PageBackground from "../components/PageBackground";
 
@@ -76,13 +76,43 @@ function YieldRiskChart({ positions }) {
 
 export default function InvestorDashboard() {
   const navigate = useNavigate();
-  const { account, isConnected } = useWeb3();
+  const { account, isConnected, signer, isCorrectChain, connectWallet } = useWeb3();
   const [positions, setPositions] = useState([]);
   const [loadingChain, setLoadingChain] = useState(false);
+  const [withdrawingTokenId, setWithdrawingTokenId] = useState(null);
   const handleList = (pos) => {
     const invoiceId = pos.tokenId || pos.id;
     if (!invoiceId) return;
     navigate(`/invoice/${invoiceId}?sell=1`);
+  };
+
+  const handleWithdraw = async (pos) => {
+    if (!pos?.tokenId) return;
+    if (!isConnected) {
+      connectWallet();
+      return;
+    }
+    if (!isCorrectChain) {
+      alert("Please switch to Base Sepolia network.");
+      return;
+    }
+    setWithdrawingTokenId(pos.tokenId);
+    try {
+      const pool = getFundingPool(signer);
+      const tx = await pool.claimReturns(pos.tokenId);
+      await tx.wait();
+
+      const updated = await fetchInvestorPortfolio(account);
+      setPositions(Array.isArray(updated?.positions) ? updated.positions : []);
+
+      window.dispatchEvent(new CustomEvent("investment-updated", {
+        detail: { tokenId: pos.tokenId, account, txHash: tx.hash },
+      }));
+    } catch (err) {
+      alert(err?.shortMessage || err?.reason || err?.message || "Withdraw failed");
+    } finally {
+      setWithdrawingTokenId(null);
+    }
   };
 
   // Read on-chain positions for connected wallet
@@ -260,6 +290,16 @@ export default function InvestorDashboard() {
                         >
                           View <ExternalIcon />
                         </button>
+                        {pos.claimable && (
+                          <button
+                            className="btn btn-gold btn-sm"
+                            onClick={() => handleWithdraw(pos)}
+                            disabled={withdrawingTokenId === pos.tokenId}
+                            style={{ fontSize: "0.74rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
+                          >
+                            {withdrawingTokenId === pos.tokenId ? "Withdrawing..." : "Withdraw"}
+                          </button>
+                        )}
                         <button
                           className="btn btn-sm"
                           onClick={() => handleList(pos)}

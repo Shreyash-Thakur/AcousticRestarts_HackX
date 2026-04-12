@@ -7,6 +7,7 @@ import paymentRoutes from "./routes/payment.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
 import riskRoutes from "./routes/risk.routes.js";
 import { startBackstopCron } from "./services/backstop.cron.js";
+import { startPayoutCron } from "./services/payout.cron.js";
 
 const app = express();
 app.use(cors());
@@ -57,4 +58,5 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`InvoFlow API running on port ${PORT}`);
   startBackstopCron();
+  startPayoutCron();
 });
