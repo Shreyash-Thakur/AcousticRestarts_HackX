@@ -10,6 +10,51 @@ It tokenizes verified invoices, enables fractional investor funding, and settles
 - Investors access short-duration, yield-bearing invoice positions.
 - Funding, fees, and settlement are enforced by smart contracts.
 
+## Web3 Track — Compliance & Implementation
+
+**✅ Rule 1: At least one on-chain transaction required**
+- Implemented: SMEs tokenize invoices via `InvoToken.sol` mint transaction
+- Investors fund via `FundingPool.sol` deposit transaction
+- Settlement & claims executed on-chain
+- See: `backend/contracts/InvoToken.sol`, `backend/contracts/FundingPool.sol`
+
+**✅ Rule 2: Must interact with a blockchain (testnet or mainnet)**
+- Deployed on: Base Sepolia & Polygon Amoy testnets
+- RPC configuration: `BASE_SEPOLIA_RPC_URL`, `POLYGON_AMOY_RPC_URL` in `.env`
+- Deploy commands: `npm run deploy:base-sepolia`, `npm run deploy:polygon-amoy`
+- Contract addresses tracked via `CONTRACT_ADDRESS` and `INVOICE_CONTRACT_ADDRESS` env vars
+- See: `backend/hardhat.config.cjs`, `backend/package.json` scripts
+
+**✅ Rule 3: Smart contract required**
+- Core contracts:
+  - `InvoToken.sol`: ERC-3525 invoice tokenization (ID, SLOT, VALUE model)
+  - `FundingPool.sol`: Fractional USDC funding pool, origination fees, settlement
+  - `InvoPaymaster.sol`: ERC-4337 paymaster for gasless transactions
+  - `ChainlinkGSTVerifier.sol`: Chainlink Functions-based GST verification gate
+- All contracts tested: `backend/test/` includes unit & integration tests
+- See: `backend/contracts/`
+
+**✅ Rule 4: Wallet integration required (signing / execution)**
+- Frontend wallet integration: React pages for connect/sign/execute flows
+- `frontend/src/pages/` includes roles for SME and Investor wallet interactions
+- Backend API bridges frontend to contract calls via signed transactions
+- Smart contract execution with gas estimation & fee handling
+- See: `backend/src/controllers/invoice.controller.js`, `frontend/src/pages/`
+
+**✅ Rule 5: Submit contract address + explorer link**
+- Contract addresses stored in `.env` as `CONTRACT_ADDRESS`, `INVOICE_CONTRACT_ADDRESS`
+- Hardhat config supports Etherscan verification: `ETHERSCAN_API_KEY` in `.env`
+- Deploy scripts log verified contract addresses ready for explorer submission
+- See: `backend/hardhat.config.cjs`, `backend/scripts/`
+
+**✅ Rule 6: Must demonstrate real decentralization (no mock Web3)**
+- Real blockchain transactions required for each flow step
+- No hardcoded/mocked blockchain responses
+- ERC-4337 paymaster enables real gasless transaction execution
+- Chainlink Functions integrates external GST verification into on-chain gate
+- Full settlement & dispute logic enforced by smart contract code
+- See: `backend/contracts/FundingPool.sol` (settlement), `backend/contracts/InvoToken.sol` (tokenization)
+
 ## Architecture
 
 ### Frontend
