@@ -5,6 +5,7 @@ import { useWeb3 } from "../context/Web3Context";
 import { fetchStats } from "../lib/api";
 import Footer from "../components/Footer";
 import RevealOnScroll from "../components/RevealOnScroll";
+import logoSrc from "../assets/logo.png";
 
 /* ── Icons ── */
 const UploadIcon = () => (
@@ -299,6 +300,14 @@ export default function LandingPage() {
             animate="show"
             style={{ maxWidth: 760, margin: "0 auto", textAlign: "center" }}
           >
+            <motion.div variants={fadeUp} style={{ display: "flex", justifyContent: "center", marginBottom: "1.5rem" }}>
+              <img
+                src={logoSrc}
+                alt="InvoFlow"
+                style={{ height: 120, width: "auto", objectFit: "contain", filter: "drop-shadow(0 4px 24px rgba(158,112,48,0.22))" }}
+              />
+            </motion.div>
+
             <motion.div variants={fadeUp}>
               <span className="section-tag">Decentralized Invoice Financing</span>
             </motion.div>

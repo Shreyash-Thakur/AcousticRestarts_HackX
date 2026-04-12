@@ -1,11 +1,8 @@
 import { Link } from "react-router-dom";
+import logoSrc from "../assets/logo.png";
 
 const LogoMark = () => (
-  <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
-    <rect width="28" height="28" rx="7" fill="#4ADE80" fillOpacity="0.15"/>
-    <path d="M8 10h12M8 14h9M8 18h6" stroke="#4ADE80" strokeWidth="1.8" strokeLinecap="round"/>
-    <path d="M20 17l3-3-3-3" stroke="#86EFAC" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
+  <img src={logoSrc} alt="InvoFlow" style={{ height: 30, width: "auto", objectFit: "contain", display: "block" }} />
 );
 
 const GitHubIcon = () => (

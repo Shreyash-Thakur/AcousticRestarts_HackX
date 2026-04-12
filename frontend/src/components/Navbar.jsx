@@ -2,13 +2,10 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useWeb3 } from "../context/Web3Context";
+import logoSrc from "../assets/logo.png";
 
 const LogoMark = () => (
-  <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-    <rect width="28" height="28" rx="7" fill="var(--gold)"/>
-    <path d="M8 10h12M8 14h9M8 18h6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/>
-    <path d="M20 17l3-3-3-3" stroke="#86EFAC" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
+  <img src={logoSrc} alt="InvoFlow" style={{ height: 32, width: "auto", objectFit: "contain", display: "block" }} />
 );
 
 const WalletIcon = () => (
