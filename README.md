@@ -4,6 +4,8 @@ InvoFlow is a decentralized invoice financing platform for SMEs.
 
 It tokenizes verified invoices, enables fractional investor funding, and settles repayments with transparent on-chain logic.
 
+Live App: https://invoflow-pi.vercel.app/
+
 ## Core Outcome
 
 - SMEs unlock working capital earlier instead of waiting for invoice due dates.
